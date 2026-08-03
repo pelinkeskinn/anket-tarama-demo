@@ -1,0 +1,12 @@
+backend/.venv/
+backend/.pytest_cache/
+backend/server.log
+backend/server.err.log
+backend/data/demo.db
+backend/data/*.db
+frontend/node_modules/
+frontend/.next/
+frontend/coverage/
+*.pyc
+__pycache__/
+
