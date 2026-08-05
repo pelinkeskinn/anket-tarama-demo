@@ -6,7 +6,7 @@ from pathlib import Path
 
 import cv2
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.config import SAMPLE_FORMS_DIR
 from app.database import temporary_image_files
@@ -65,6 +65,33 @@ def pixel_rotated_jpeg_bytes(name: str) -> bytes:
     return encoded.tobytes()
 
 
+def child_marked_image_bytes(style: str) -> bytes:
+    template = json.loads((ROOT / "backend" / "templates" / "demo_form_v1.json").read_text(encoding="utf-8"))
+    expected = json.loads((ROOT / "sample-forms" / "expected-results.json").read_text(encoding="utf-8"))["filled-clean.png"]
+    with Image.open(SAMPLE_FORMS_DIR / "blank-form.png") as image:
+        marked = image.convert("RGB")
+    draw = ImageDraw.Draw(marked)
+    for question in template["questions"]:
+        question_no = int(question["questionNo"])
+        option = expected[str(question_no)]
+        box = question["options"][option]
+        center_x = int(box["x"]) + int(box["width"]) // 2
+        center_y = int(box["y"]) + int(box["height"]) // 2
+        if style == "tick":
+            draw.line((center_x - 28, center_y + 2, center_x - 8, center_y + 24, center_x + 31, center_y - 28), fill="black", width=10)
+        elif style == "x":
+            draw.line((center_x - 30, center_y - 30, center_x + 30, center_y + 30), fill="black", width=9)
+            draw.line((center_x + 30, center_y - 30, center_x - 30, center_y + 30), fill="black", width=9)
+        elif style == "partial":
+            draw.arc((center_x - 34, center_y - 34, center_x + 34, center_y + 34), start=205, end=515, fill="black", width=14)
+            draw.line((center_x - 22, center_y + 15, center_x + 22, center_y - 15), fill="black", width=9)
+        else:
+            raise ValueError(style)
+    output = BytesIO()
+    marked.save(output, format="PNG")
+    return output.getvalue()
+
+
 def answer_map(response) -> dict[int, str | None]:
     return {answer.questionNo: answer.status if answer.status != "OK" else answer.value for answer in response.answers}
 
@@ -90,11 +117,45 @@ def test_full_page_upload_falls_back_when_markers_are_missing() -> None:
 
 
 def test_uploaded_kizilay_forms_are_accepted() -> None:
-    for filename in ["IMG_4134(1).png", "IMG_4135.png", "IMG_4136.png", "IMG_4137.png"]:
+    for filename in ["IMG_4134(1).png", "IMG_4135.png", "IMG_4136.png", "IMG_4137.png", "IMG_4140.png", "IMG_4140.jpeg"]:
         response = analyze_image_bytes(image_bytes(filename))
         assert response.templateCode == "KR_SURVEY_V1"
         assert response.status != "TOO_MANY_UNCERTAIN"
         assert response.reviewRequiredCount <= 4
+
+
+def test_faint_pencil_upload_is_read_correctly() -> None:
+    response = analyze_image_bytes(image_bytes("IMG_4140.jpeg"))
+    values = {answer.questionNo: answer.value for answer in response.answers}
+    assert response.templateCode == "KR_SURVEY_V1"
+    assert response.status == "OK"
+    assert values == {
+        1: "NEVER",
+        2: "ALWAYS",
+        3: "ALWAYS",
+        4: "ALWAYS",
+        5: "ALWAYS",
+        6: "ALWAYS",
+        7: "ALWAYS",
+        8: "SOMETIMES",
+        9: "SOMETIMES",
+        10: "SOMETIMES",
+        11: "ALWAYS",
+        12: "ALWAYS",
+        13: "ALWAYS",
+        14: "SOMETIMES",
+        15: "SOMETIMES",
+        16: "SOMETIMES",
+        17: "ALWAYS",
+        18: "ALWAYS",
+        19: "ALWAYS",
+        20: "SOMETIMES",
+        21: "NEVER",
+        22: "NEVER",
+        23: "NEVER",
+        24: "NEVER",
+        25: "NEVER",
+    }
 
 
 def test_jpeg_exif_orientation_is_applied() -> None:
@@ -124,11 +185,21 @@ def test_double_mark_returns_double_mark() -> None:
     assert answer.source == "UNRESOLVED"
 
 
-def test_low_confidence_answer_returns_uncertain() -> None:
+def test_faint_synthetic_marks_are_read_correctly() -> None:
     response = analyze_image_bytes(image_bytes("filled-faint-marks.png"))
     answer = {answer.questionNo: answer for answer in response.answers}[5]
-    assert answer.status == "UNCERTAIN"
-    assert answer.confidence < 0.7
+    assert response.status == "OK"
+    assert answer.status == "OK"
+    assert answer.value == "SOMETIMES"
+
+
+@pytest.mark.parametrize("style", ["tick", "x", "partial"])
+def test_child_style_marks_are_read_correctly(style: str) -> None:
+    expected = json.loads((ROOT / "sample-forms" / "expected-results.json").read_text(encoding="utf-8"))["filled-clean.png"]
+    response = analyze_image_bytes(child_marked_image_bytes(style))
+    values = {str(answer.questionNo): answer.value for answer in response.answers}
+    assert response.status == "OK"
+    assert values == expected
 
 
 def test_missing_markers_returns_error() -> None:

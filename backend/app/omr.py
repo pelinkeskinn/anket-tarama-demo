@@ -130,7 +130,7 @@ def _warp_to_template(image: np.ndarray, template: dict[str, Any]) -> np.ndarray
         dtype=np.float32,
     )
     try:
-        source = _find_marker_centers(image)
+        source = _find_marker_centers(image, page_width / page_height)
     except OmrError:
         source = _find_page_corners(image, page_width / page_height)
         destination = np.array(
@@ -147,21 +147,24 @@ def _warp_to_template(image: np.ndarray, template: dict[str, Any]) -> np.ndarray
     return cv2.warpPerspective(image, transform, (int(page_width), int(page_height)))
 
 
-def _find_marker_centers(image: np.ndarray) -> np.ndarray:
+def _find_marker_centers(image: np.ndarray, target_aspect: float) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     height, width = gray.shape
     min_area = max(120, width * height * 0.000025)
 
-    marker_sets: list[np.ndarray] = []
+    all_candidates: list[tuple[float, float, float]] = []
     for thresholded in _marker_thresholds(blurred):
-        candidates = _marker_candidates(thresholded, min_area)
-        ordered = _order_marker_candidates(candidates, width / max(height, 1))
-        if ordered is not None:
-            marker_sets.append(ordered)
+        all_candidates.extend(_marker_candidates(thresholded, min_area))
 
-    if marker_sets:
-        return max(marker_sets, key=_quadrilateral_bbox_area)
+    candidates: list[tuple[float, float, float]] = []
+    for candidate in sorted(all_candidates, key=lambda item: item[2], reverse=True):
+        if all((candidate[0] - existing[0]) ** 2 + (candidate[1] - existing[1]) ** 2 > 20**2 for existing in candidates):
+            candidates.append(candidate)
+
+    ordered = _order_marker_candidates(candidates, width, height, target_aspect)
+    if ordered is not None:
+        return ordered
 
     raise OmrError("MARKERS_NOT_FOUND")
 
@@ -200,9 +203,17 @@ def _marker_candidates(thresholded: np.ndarray, min_area: float) -> list[tuple[f
     return candidates
 
 
-def _order_marker_candidates(candidates: list[tuple[float, float, float]], image_aspect: float) -> np.ndarray | None:
+def _order_marker_candidates(candidates: list[tuple[float, float, float]], width: int, height: int, target_aspect: float) -> np.ndarray | None:
     if len(candidates) < 4:
         return None
+
+    extreme_ordered = _select_extreme_marker_quad(candidates, width, height, target_aspect)
+    if extreme_ordered is not None:
+        return extreme_ordered
+
+    corner_ordered = _select_corner_marker_quad(candidates, width, height, target_aspect)
+    if corner_ordered is not None:
+        return corner_ordered
 
     centers = np.array([[x, y] for x, y, _ in sorted(candidates, key=lambda item: item[2], reverse=True)[:240]])
     ordered = np.array(
@@ -217,12 +228,113 @@ def _order_marker_candidates(candidates: list[tuple[float, float, float]], image
     if len({tuple(point) for point in ordered}) < 4:
         return None
     quad_aspect = _quadrilateral_aspect(ordered)
-    target_aspect = 1 / image_aspect if image_aspect > 1 else image_aspect
     if abs(quad_aspect - target_aspect) / max(target_aspect, 0.01) > 0.28:
         return None
     if not _has_consistent_edges(ordered):
         return None
     return ordered
+
+
+def _select_extreme_marker_quad(candidates: list[tuple[float, float, float]], width: int, height: int, target_aspect: float) -> np.ndarray | None:
+    centers = np.array([[x, y] for x, y, _ in candidates], dtype=np.float32)
+    ordered = np.array(
+        [
+            centers[np.argmin(centers[:, 0] + centers[:, 1])],
+            centers[np.argmax(centers[:, 0] - centers[:, 1])],
+            centers[np.argmax(centers[:, 0] + centers[:, 1])],
+            centers[np.argmin(centers[:, 0] - centers[:, 1])],
+        ],
+        dtype=np.float32,
+    )
+    if len({tuple(point) for point in ordered}) < 4:
+        return None
+    quad_aspect = _quadrilateral_aspect(ordered)
+    if abs(quad_aspect - target_aspect) / max(target_aspect, 0.01) > 0.22:
+        return None
+    if not _has_consistent_edges(ordered):
+        return None
+    if _quadrilateral_bbox_area(ordered) < width * height * 0.18:
+        return None
+    if not _points_are_near_image_corners(ordered, width, height):
+        return None
+    return ordered
+
+
+def _select_corner_marker_quad(candidates: list[tuple[float, float, float]], width: int, height: int, target_aspect: float) -> np.ndarray | None:
+    regions = (
+        ((0.0, 0.45), (0.0, 0.45), (0.0, 0.0)),
+        ((0.55, 1.0), (0.0, 0.45), (1.0, 0.0)),
+        ((0.55, 1.0), (0.55, 1.0), (1.0, 1.0)),
+        ((0.0, 0.45), (0.55, 1.0), (0.0, 1.0)),
+    )
+    groups: list[list[tuple[float, float, float]]] = []
+    diagonal = float(np.hypot(width, height))
+    for (x_range, y_range, corner) in regions:
+        region_candidates = [
+            candidate
+            for candidate in candidates
+            if x_range[0] * width <= candidate[0] <= x_range[1] * width
+            and y_range[0] * height <= candidate[1] <= y_range[1] * height
+        ]
+        if not region_candidates:
+            return None
+        corner_x, corner_y = corner[0] * width, corner[1] * height
+        ranked = sorted(
+            region_candidates,
+            key=lambda item: item[2] * (1.0 + 2.0 * max(0.0, 1.0 - float(np.hypot(item[0] - corner_x, item[1] - corner_y)) / diagonal)),
+            reverse=True,
+        )
+        groups.append(ranked[:8])
+
+    best_score = 0.0
+    best_ordered: np.ndarray | None = None
+    image_area = width * height
+    for top_left in groups[0]:
+        for top_right in groups[1]:
+            for bottom_right in groups[2]:
+                for bottom_left in groups[3]:
+                    ordered = np.array(
+                        [
+                            [top_left[0], top_left[1]],
+                            [top_right[0], top_right[1]],
+                            [bottom_right[0], bottom_right[1]],
+                            [bottom_left[0], bottom_left[1]],
+                        ],
+                        dtype=np.float32,
+                    )
+                    if len({tuple(point) for point in ordered}) < 4:
+                        continue
+                    quad_aspect = _quadrilateral_aspect(ordered)
+                    aspect_error = abs(quad_aspect - target_aspect) / max(target_aspect, 0.01)
+                    if aspect_error > 0.22 or not _has_consistent_edges(ordered):
+                        continue
+                    if not _points_are_near_image_corners(ordered, width, height):
+                        continue
+                    bbox_area = _quadrilateral_bbox_area(ordered)
+                    if bbox_area < image_area * 0.18:
+                        continue
+                    marker_areas = [top_left[2], top_right[2], bottom_right[2], bottom_left[2]]
+                    area_ratio = max(marker_areas) / max(min(marker_areas), 1.0)
+                    if area_ratio > 5.0:
+                        continue
+                    score = bbox_area * (1.0 - aspect_error) / (area_ratio**0.35)
+                    if score > best_score:
+                        best_score = score
+                        best_ordered = ordered
+    return best_ordered
+
+
+def _points_are_near_image_corners(points: np.ndarray, width: int, height: int) -> bool:
+    return bool(
+        points[0][0] <= width * 0.34
+        and points[0][1] <= height * 0.22
+        and points[1][0] >= width * 0.66
+        and points[1][1] <= height * 0.22
+        and points[2][0] >= width * 0.66
+        and points[2][1] >= height * 0.78
+        and points[3][0] <= width * 0.34
+        and points[3][1] >= height * 0.78
+    )
 
 
 def _quadrilateral_aspect(points: np.ndarray) -> float:
@@ -301,15 +413,54 @@ def _order_points(points: np.ndarray) -> np.ndarray:
 
 def _read_answers(warped: np.ndarray, template: dict[str, Any]) -> list[AnswerResult]:
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    answers = _read_answers_from_gray(gray, template)
+    if template.get("templateCode") == "KR_SURVEY_V1":
+        corrected = _read_answers_from_gray(gray, template, _kizilay_right_column_curve_shifts())
+        if _analysis_score((template, corrected, 0, 0)) > _analysis_score((template, answers, 0, 0)):
+            return corrected
+    return answers
+
+
+def _read_answers_from_gray(gray: np.ndarray, template: dict[str, Any], shifts: dict[int, tuple[int, int]] | None = None) -> list[AnswerResult]:
     answers: list[AnswerResult] = []
     for question in template["questions"]:
+        question_no = int(question["questionNo"])
+        dx, dy = shifts.get(question_no, (0, 0)) if shifts else (0, 0)
         densities = {
-            option: _mark_density(gray, box)
+            option: _mark_density(gray, _shift_box(box, dx, dy))
             for option, box in question["options"].items()
             if option in OPTION_ORDER
         }
-        answers.append(_decide_question(int(question["questionNo"]), densities))
+        answers.append(_decide_question(question_no, densities))
     return answers
+
+
+def _kizilay_right_column_curve_shifts() -> dict[int, tuple[int, int]]:
+    return {
+        14: (-130, 180),
+        15: (-130, 170),
+        16: (-125, 145),
+        17: (-120, 115),
+        18: (-110, 95),
+        19: (-100, 75),
+        20: (-70, 55),
+        21: (-40, 35),
+        22: (-25, 20),
+        23: (-15, 10),
+        24: (-5, 5),
+        25: (0, 0),
+    }
+
+
+def _shift_box(box: dict[str, int], dx: int, dy: int) -> dict[str, int]:
+    if dx == 0 and dy == 0:
+        return box
+    return {
+        "x": int(box["x"]) + dx,
+        "y": int(box["y"]) + dy,
+        "width": int(box["width"]),
+        "height": int(box["height"]),
+    }
 
 
 def _mark_density(gray: np.ndarray, box: dict[str, int]) -> float:
@@ -320,17 +471,22 @@ def _mark_density(gray: np.ndarray, box: dict[str, int]) -> float:
 
     yy, xx = np.ogrid[:height, :width]
     distance = (xx - width / 2) ** 2 + (yy - height / 2) ** 2
-    center_radius = min(width, height) * 0.28
-    background_radius = min(width, height) * 0.45
+    center_radius = min(width, height) * 0.36
+    background_inner_radius = min(width, height) * 0.42
+    background_outer_radius = min(width, height) * 0.5
     center = roi[distance <= center_radius**2]
-    background = roi[distance >= background_radius**2]
+    background = roi[(distance >= background_inner_radius**2) & (distance <= background_outer_radius**2)]
     if center.size == 0 or background.size == 0:
         return 0.0
 
-    center_darkness = float(np.mean((255.0 - center.astype(np.float32)) / 255.0))
     background_darkness = float(np.median((255.0 - background.astype(np.float32)) / 255.0))
-    normalized = (center_darkness - background_darkness) / max(1.0 - background_darkness, 0.01)
-    return round(float(np.clip(normalized, 0, 1)), 4)
+    darkness = (255.0 - center.astype(np.float32)) / 255.0
+    normalized = np.clip((darkness - background_darkness) / max(1.0 - background_darkness, 0.01), 0, 1)
+    dark_pixel_ratio = float(np.mean(normalized > 0.10))
+    darkest_pixels = np.sort(normalized.reshape(-1))[int(normalized.size * 0.8) :]
+    darkest_mean = float(np.mean(darkest_pixels)) if darkest_pixels.size else 0.0
+    score = dark_pixel_ratio * 0.55 + darkest_mean * 0.45
+    return round(float(np.clip(score, 0, 1)), 4)
 
 
 def _decide_question(question_no: int, densities: dict[str, float]) -> AnswerResult:

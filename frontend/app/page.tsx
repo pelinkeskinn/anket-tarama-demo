@@ -508,7 +508,7 @@ function BlankConfirm({ blanks, onRetry, onContinue }: { blanks: Answer[]; onRet
   return (
     <section className="screen">
       <div className="panel stack">
-        <div className="status-title">Bu formda {blanks.length} soru boş bırakılmıştır.</div>
+        <div className="status-title">Bu formda {blanks.length} soru boş veya çok zayıf işaretli görünüyor.</div>
         {blanks.map((answer) => (
           <strong key={answer.questionNo}>Soru {answer.questionNo}</strong>
         ))}

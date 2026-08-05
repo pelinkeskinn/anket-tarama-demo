@@ -201,8 +201,8 @@ def save_all() -> None:
         "filled-clean.png": {str(k): v for k, v in clean_answers.items()},
         "filled-with-blanks.png": {str(k): v for k, v in with_blanks.items()},
         "filled-double-mark.png": {str(k): ("DOUBLE_MARK" if k == 7 else v) for k, v in clean_answers.items()},
-        "filled-faint-marks.png": {str(k): ("UNCERTAIN" if k == 5 else v) for k, v in clean_answers.items()},
-        "filled-erased-mark.png": {str(k): ("UNCERTAIN" if k == 8 else v) for k, v in clean_answers.items()},
+        "filled-faint-marks.png": {str(k): v for k, v in clean_answers.items()},
+        "filled-erased-mark.png": {str(k): v for k, v in clean_answers.items()},
     }
     (SAMPLES / "expected-results.json").write_text(json.dumps(expected, ensure_ascii=False, indent=2), encoding="utf-8")
 
