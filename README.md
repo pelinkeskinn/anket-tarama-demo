@@ -18,7 +18,7 @@ Fotoğraflar kalıcı olarak saklanmaz. Görüntü yalnızca analiz sırasında 
 - Docker kullanımı opsiyoneldir
 
 ## Docker ile çalıştırma
-
+Windows: Önce Docker Desktop'ı çalıştır, sonra terminalde aşağıdaki komutu gir:
 ```bash
 docker compose up --build
 ```
