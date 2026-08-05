@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import time
 import uuid
+from io import BytesIO
 from typing import Any
 
 import cv2
 import numpy as np
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.config import (
     DOUBLE_MARK_THRESHOLD,
@@ -17,7 +19,7 @@ from app.config import (
 )
 from app.errors import OmrError
 from app.models import AnalyzeResponse, AnswerResult, ProcessingStats
-from app.template import load_template
+from app.template import load_templates
 
 
 OPTION_ORDER = ("NEVER", "SOMETIMES", "ALWAYS")
@@ -31,14 +33,17 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
     image = _decode_image(image_bytes)
     _validate_quality(image)
 
-    perspective_start = time.perf_counter()
-    template = load_template()
-    warped = _warp_to_template(image, template)
-    perspective_ms = _elapsed_ms(perspective_start)
-
-    omr_start = time.perf_counter()
-    answers = _read_answers(warped, template)
-    omr_ms = _elapsed_ms(omr_start)
+    candidates: list[tuple[dict[str, Any], list[AnswerResult], int, int]] = []
+    for oriented_image in _orientation_candidates(image):
+        for template in load_templates():
+            try:
+                candidates.append(_analyze_template(oriented_image, template))
+            except OmrError as exc:
+                if exc.code != "MARKERS_NOT_FOUND":
+                    raise
+    if not candidates:
+        raise OmrError("MARKERS_NOT_FOUND")
+    template, answers, perspective_ms, omr_ms = max(candidates, key=_analysis_score)
 
     review_required_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
     blank_count = sum(1 for answer in answers if answer.status == "BLANK")
@@ -61,12 +66,43 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
     )
 
 
+def _analyze_template(image: np.ndarray, template: dict[str, Any]) -> tuple[dict[str, Any], list[AnswerResult], int, int]:
+    perspective_start = time.perf_counter()
+    warped = _warp_to_template(image, template)
+    perspective_ms = _elapsed_ms(perspective_start)
+
+    omr_start = time.perf_counter()
+    answers = _read_answers(warped, template)
+    omr_ms = _elapsed_ms(omr_start)
+    return template, answers, perspective_ms, omr_ms
+
+
+def _analysis_score(candidate: tuple[dict[str, Any], list[AnswerResult], int, int]) -> tuple[float, int]:
+    _, answers, _, _ = candidate
+    review_required_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
+    return (_form_confidence(answers), -review_required_count)
+
+
 def _decode_image(image_bytes: bytes) -> np.ndarray:
-    data = np.frombuffer(image_bytes, dtype=np.uint8)
-    image = cv2.imdecode(data, cv2.IMREAD_COLOR)
-    if image is None or image.size == 0:
+    try:
+        with Image.open(BytesIO(image_bytes)) as pil_image:
+            corrected = ImageOps.exif_transpose(pil_image).convert("RGB")
+            image = cv2.cvtColor(np.array(corrected), cv2.COLOR_RGB2BGR)
+    except (OSError, UnidentifiedImageError) as exc:
+        raise OmrError("INVALID_FILE") from exc
+
+    if image.size == 0:
         raise OmrError("INVALID_FILE")
     return image
+
+
+def _orientation_candidates(image: np.ndarray) -> list[np.ndarray]:
+    return [
+        image,
+        cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE),
+        cv2.rotate(image, cv2.ROTATE_180),
+        cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE),
+    ]
 
 
 def _validate_quality(image: np.ndarray) -> None:
@@ -79,7 +115,6 @@ def _validate_quality(image: np.ndarray) -> None:
 
 
 def _warp_to_template(image: np.ndarray, template: dict[str, Any]) -> np.ndarray:
-    marker_centers = _find_marker_centers(image)
     marker_size = float(template["markerSize"])
     marker_margin = float(template["markerMargin"])
     page_width = float(template["pageWidth"])
@@ -94,18 +129,64 @@ def _warp_to_template(image: np.ndarray, template: dict[str, Any]) -> np.ndarray
         ],
         dtype=np.float32,
     )
-    transform = cv2.getPerspectiveTransform(marker_centers, destination)
+    try:
+        source = _find_marker_centers(image)
+    except OmrError:
+        source = _find_page_corners(image, page_width / page_height)
+        destination = np.array(
+            [
+                [0, 0],
+                [page_width, 0],
+                [page_width, page_height],
+                [0, page_height],
+            ],
+            dtype=np.float32,
+        )
+
+    transform = cv2.getPerspectiveTransform(source, destination)
     return cv2.warpPerspective(image, transform, (int(page_width), int(page_height)))
 
 
 def _find_marker_centers(image: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, thresholded = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(thresholded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
     height, width = gray.shape
-    min_area = max(800, width * height * 0.0002)
+    min_area = max(120, width * height * 0.000025)
+
+    marker_sets: list[np.ndarray] = []
+    for thresholded in _marker_thresholds(blurred):
+        candidates = _marker_candidates(thresholded, min_area)
+        ordered = _order_marker_candidates(candidates, width / max(height, 1))
+        if ordered is not None:
+            marker_sets.append(ordered)
+
+    if marker_sets:
+        return max(marker_sets, key=_quadrilateral_bbox_area)
+
+    raise OmrError("MARKERS_NOT_FOUND")
+
+
+def _marker_thresholds(gray: np.ndarray) -> list[np.ndarray]:
+    _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    adaptive = cv2.adaptiveThreshold(
+        gray,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        51,
+        9,
+    )
+    kernel = np.ones((3, 3), np.uint8)
+    return [
+        otsu,
+        cv2.morphologyEx(otsu, cv2.MORPH_CLOSE, kernel, iterations=1),
+        adaptive,
+        cv2.morphologyEx(adaptive, cv2.MORPH_CLOSE, kernel, iterations=1),
+    ]
+
+
+def _marker_candidates(thresholded: np.ndarray, min_area: float) -> list[tuple[float, float, float]]:
+    contours, _ = cv2.findContours(thresholded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     candidates: list[tuple[float, float, float]] = []
     for contour in contours:
         area = float(cv2.contourArea(contour))
@@ -114,13 +195,16 @@ def _find_marker_centers(image: np.ndarray) -> np.ndarray:
         x, y, w, h = cv2.boundingRect(contour)
         aspect = w / max(h, 1)
         fill = area / max(w * h, 1)
-        if 0.65 <= aspect <= 1.35 and fill > 0.55:
+        if 0.5 <= aspect <= 1.55 and fill > 0.4:
             candidates.append((x + w / 2, y + h / 2, area))
+    return candidates
 
+
+def _order_marker_candidates(candidates: list[tuple[float, float, float]], image_aspect: float) -> np.ndarray | None:
     if len(candidates) < 4:
-        raise OmrError("MARKERS_NOT_FOUND")
+        return None
 
-    centers = np.array([[x, y] for x, y, _ in sorted(candidates, key=lambda item: item[2], reverse=True)[:12]])
+    centers = np.array([[x, y] for x, y, _ in sorted(candidates, key=lambda item: item[2], reverse=True)[:240]])
     ordered = np.array(
         [
             centers[np.argmin(centers[:, 0] + centers[:, 1])],
@@ -131,8 +215,88 @@ def _find_marker_centers(image: np.ndarray) -> np.ndarray:
         dtype=np.float32,
     )
     if len({tuple(point) for point in ordered}) < 4:
-        raise OmrError("MARKERS_NOT_FOUND")
+        return None
+    quad_aspect = _quadrilateral_aspect(ordered)
+    target_aspect = 1 / image_aspect if image_aspect > 1 else image_aspect
+    if abs(quad_aspect - target_aspect) / max(target_aspect, 0.01) > 0.28:
+        return None
+    if not _has_consistent_edges(ordered):
+        return None
     return ordered
+
+
+def _quadrilateral_aspect(points: np.ndarray) -> float:
+    top_width = float(np.linalg.norm(points[1] - points[0]))
+    bottom_width = float(np.linalg.norm(points[2] - points[3]))
+    left_height = float(np.linalg.norm(points[3] - points[0]))
+    right_height = float(np.linalg.norm(points[2] - points[1]))
+    return ((top_width + bottom_width) / 2) / max((left_height + right_height) / 2, 1)
+
+
+def _quadrilateral_bbox_area(points: np.ndarray) -> float:
+    return float((np.max(points[:, 0]) - np.min(points[:, 0])) * (np.max(points[:, 1]) - np.min(points[:, 1])))
+
+
+def _has_consistent_edges(points: np.ndarray) -> bool:
+    top_width = float(np.linalg.norm(points[1] - points[0]))
+    bottom_width = float(np.linalg.norm(points[2] - points[3]))
+    left_height = float(np.linalg.norm(points[3] - points[0]))
+    right_height = float(np.linalg.norm(points[2] - points[1]))
+    width_ratio = max(top_width, bottom_width) / max(min(top_width, bottom_width), 1)
+    height_ratio = max(left_height, right_height) / max(min(left_height, right_height), 1)
+    return width_ratio <= 1.35 and height_ratio <= 1.35
+
+
+def _find_page_corners(image: np.ndarray, target_aspect: float) -> np.ndarray:
+    height, width = image.shape[:2]
+    aspect = width / max(height, 1)
+    if abs(aspect - target_aspect) / target_aspect <= 0.18:
+        return np.array(
+            [
+                [0, 0],
+                [width - 1, 0],
+                [width - 1, height - 1],
+                [0, height - 1],
+            ],
+            dtype=np.float32,
+        )
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    thresholded = cv2.adaptiveThreshold(
+        blurred,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        51,
+        7,
+    )
+    contours, _ = cv2.findContours(thresholded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    image_area = width * height
+    for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:10]:
+        area = float(cv2.contourArea(contour))
+        if area < image_area * 0.2:
+            continue
+        perimeter = cv2.arcLength(contour, True)
+        polygon = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
+        if len(polygon) != 4:
+            continue
+        corners = polygon.reshape(4, 2).astype(np.float32)
+        return _order_points(corners)
+
+    raise OmrError("MARKERS_NOT_FOUND")
+
+
+def _order_points(points: np.ndarray) -> np.ndarray:
+    return np.array(
+        [
+            points[np.argmin(points[:, 0] + points[:, 1])],
+            points[np.argmax(points[:, 0] - points[:, 1])],
+            points[np.argmax(points[:, 0] + points[:, 1])],
+            points[np.argmin(points[:, 0] - points[:, 1])],
+        ],
+        dtype=np.float32,
+    )
 
 
 def _read_answers(warped: np.ndarray, template: dict[str, Any]) -> list[AnswerResult]:
@@ -155,11 +319,18 @@ def _mark_density(gray: np.ndarray, box: dict[str, int]) -> float:
         return 0.0
 
     yy, xx = np.ogrid[:height, :width]
-    radius = min(width, height) * 0.34
-    mask = (xx - width / 2) ** 2 + (yy - height / 2) ** 2 <= radius**2
-    center = roi[mask]
-    darkness = (255.0 - center.astype(np.float32)) / 255.0
-    return round(float(np.clip(np.mean(darkness), 0, 1)), 4)
+    distance = (xx - width / 2) ** 2 + (yy - height / 2) ** 2
+    center_radius = min(width, height) * 0.28
+    background_radius = min(width, height) * 0.45
+    center = roi[distance <= center_radius**2]
+    background = roi[distance >= background_radius**2]
+    if center.size == 0 or background.size == 0:
+        return 0.0
+
+    center_darkness = float(np.mean((255.0 - center.astype(np.float32)) / 255.0))
+    background_darkness = float(np.median((255.0 - background.astype(np.float32)) / 255.0))
+    normalized = (center_darkness - background_darkness) / max(1.0 - background_darkness, 0.01)
+    return round(float(np.clip(normalized, 0, 1)), 4)
 
 
 def _decide_question(question_no: int, densities: dict[str, float]) -> AnswerResult:

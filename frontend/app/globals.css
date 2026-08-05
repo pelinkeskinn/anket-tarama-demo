@@ -222,6 +222,56 @@ button:disabled {
   letter-spacing: 0;
 }
 
+.upload-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  align-items: center;
+  min-height: 86px;
+  padding: 14px;
+  border: 2px dashed #b9c5ca;
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+}
+
+.upload-card:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px #ffd6da;
+}
+
+.upload-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.upload-title {
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.upload-copy {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.upload-action {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 36px;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #eef2f3;
+  color: var(--ink);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .demo-tools {
   padding: 12px;
   background: var(--panel);
@@ -344,6 +394,18 @@ button:disabled {
   .camera-shell video,
   .camera-placeholder {
     min-height: 620px;
+  }
+}
+
+@media (max-width: 420px) {
+  .upload-card {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-action {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
   }
 }
 

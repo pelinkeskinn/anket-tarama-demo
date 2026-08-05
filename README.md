@@ -55,7 +55,7 @@ npm run dev
 Gerekirse `frontend/.env.local` içine şunu ekleyin:
 
 ```text
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+SERVER_API_BASE_URL=http://localhost:8000
 ```
 
 ## Kamera ve telefon testi
@@ -71,10 +71,10 @@ npm run dev -- --hostname 0.0.0.0
 
 Telefon tarayıcısında `http://BILGISAYAR_IP:3000` açılır. Bazı mobil tarayıcılar yerel HTTP adresinde kamera izni vermeyebilir; bu durumda HTTPS tüneli veya yerel sertifika gerekir.
 
-Telefon üzerinden demo görselleri ve analiz API'si için frontend ortam değişkeni bilgisayar IP adresini göstermelidir:
+Frontend, `/api` isteklerini backend'e proxy eder. Backend farklı bir portta veya adreste çalışıyorsa `frontend/.env.local` içinde server tarafı proxy hedefini ayarlayın:
 
 ```text
-NEXT_PUBLIC_API_BASE_URL=http://BILGISAYAR_IP:8000
+SERVER_API_BASE_URL=http://BILGISAYAR_IP:8000
 ```
 
 ## Örnek form

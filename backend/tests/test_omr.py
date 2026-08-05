@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from pathlib import Path
 
+import cv2
 import pytest
+from PIL import Image
 
 from app.config import SAMPLE_FORMS_DIR
 from app.database import temporary_image_files
@@ -18,6 +21,50 @@ def image_bytes(name: str) -> bytes:
     return (SAMPLE_FORMS_DIR / name).read_bytes()
 
 
+def resized_image_bytes(name: str, width: int) -> bytes:
+    image = cv2.imread(str(SAMPLE_FORMS_DIR / name))
+    height = int(image.shape[0] * width / image.shape[1])
+    resized = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
+    success, encoded = cv2.imencode(".png", resized)
+    assert success
+    return encoded.tobytes()
+
+
+def markerless_image_bytes(name: str) -> bytes:
+    image = cv2.imread(str(SAMPLE_FORMS_DIR / name))
+    margin = 140
+    size = 130
+    height, width = image.shape[:2]
+    for x, y in [
+        (margin, margin),
+        (width - margin - size, margin),
+        (width - margin - size, height - margin - size),
+        (margin, height - margin - size),
+    ]:
+        image[y : y + size, x : x + size] = 255
+    success, encoded = cv2.imencode(".png", image)
+    assert success
+    return encoded.tobytes()
+
+
+def exif_rotated_jpeg_bytes(name: str) -> bytes:
+    with Image.open(SAMPLE_FORMS_DIR / name) as image:
+        rotated_pixels = image.rotate(90, expand=True)
+        exif = Image.Exif()
+        exif[274] = 6
+        output = BytesIO()
+        rotated_pixels.save(output, format="JPEG", quality=90, exif=exif)
+        return output.getvalue()
+
+
+def pixel_rotated_jpeg_bytes(name: str) -> bytes:
+    image = cv2.imread(str(SAMPLE_FORMS_DIR / name))
+    rotated = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+    success, encoded = cv2.imencode(".jpg", rotated, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+    assert success
+    return encoded.tobytes()
+
+
 def answer_map(response) -> dict[int, str | None]:
     return {answer.questionNo: answer.status if answer.status != "OK" else answer.value for answer in response.answers}
 
@@ -28,6 +75,38 @@ def test_clean_form_is_read_correctly() -> None:
     values = {str(answer.questionNo): answer.value for answer in response.answers}
     assert values == expected
     assert response.status == "OK"
+
+
+def test_low_resolution_manual_upload_is_read_correctly() -> None:
+    response = analyze_image_bytes(resized_image_bytes("filled-clean.png", 500))
+    assert response.status == "OK"
+    assert len(response.answers) == 25
+
+
+def test_full_page_upload_falls_back_when_markers_are_missing() -> None:
+    response = analyze_image_bytes(markerless_image_bytes("filled-clean.png"))
+    assert response.status == "OK"
+    assert len(response.answers) == 25
+
+
+def test_uploaded_kizilay_forms_are_accepted() -> None:
+    for filename in ["IMG_4134(1).png", "IMG_4135.png", "IMG_4136.png", "IMG_4137.png"]:
+        response = analyze_image_bytes(image_bytes(filename))
+        assert response.templateCode == "KR_SURVEY_V1"
+        assert response.status != "TOO_MANY_UNCERTAIN"
+        assert response.reviewRequiredCount <= 4
+
+
+def test_jpeg_exif_orientation_is_applied() -> None:
+    response = analyze_image_bytes(exif_rotated_jpeg_bytes("IMG_4137.png"))
+    assert response.templateCode == "KR_SURVEY_V1"
+    assert response.status != "TOO_MANY_UNCERTAIN"
+
+
+def test_pixel_rotated_jpeg_is_accepted() -> None:
+    response = analyze_image_bytes(pixel_rotated_jpeg_bytes("IMG_4137.png"))
+    assert response.templateCode == "KR_SURVEY_V1"
+    assert response.status != "TOO_MANY_UNCERTAIN"
 
 
 def test_blank_answers_return_blank() -> None:

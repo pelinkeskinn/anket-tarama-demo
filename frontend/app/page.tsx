@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE = "";
 const MAX_MANUAL_REVIEW_QUESTIONS = 4;
 
 type AnswerValue = "NEVER" | "SOMETIMES" | "ALWAYS" | "BLANK";
@@ -182,7 +182,7 @@ export default function Page() {
       const payload = (await response.json()) as Analysis;
       handleAnalysis(payload);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Form işlenemedi.");
+      setError(readClientError(err));
       setScreen("fatal");
     } finally {
       window.clearTimeout(slowTimer);
@@ -360,6 +360,12 @@ export default function Page() {
             <button className="scan-button" onClick={captureAndAnalyze} disabled={cameraState !== "ready" || quality !== "ready" || submittingRef.current}>
               TARAT
             </button>
+            <label className="upload-card">
+              <input className="upload-input" type="file" accept="image/*" onChange={uploadTestImage} aria-label="Test Görseli Yükle" />
+              <span className="upload-title">Anket fotoğrafı yükle</span>
+              <span className="upload-copy">Bilgisayarındaki veya telefonundaki form fotoğrafını seçip doğrudan analiz et.</span>
+              <span className="upload-action">Fotoğraf Seç</span>
+            </label>
             <details className="demo-tools">
               <summary>Demo Görseller</summary>
               <div className="demo-grid">
@@ -373,7 +379,6 @@ export default function Page() {
                 <button className="secondary-button" onClick={scanDemoImage}>
                   Demo Görselini Tara
                 </button>
-                <input className="file-input" type="file" accept="image/*" onChange={uploadTestImage} aria-label="Test Görseli Yükle" />
               </div>
             </details>
           </div>
@@ -623,12 +628,22 @@ function AnswerList({ answers, showConfidence = false }: { answers: Answer[]; sh
 }
 
 async function extractError(response: Response): Promise<string> {
+  if ([502, 503, 504].includes(response.status)) {
+    return "Sunucuya ulaşılamadı. Backend'in çalıştığından ve API adresinin doğru olduğundan emin olun.";
+  }
   try {
     const payload = (await response.json()) as { detail?: { error?: { message?: string } } };
     return payload.detail?.error?.message ?? "İşlem başarısız oldu.";
   } catch {
     return "İşlem başarısız oldu.";
   }
+}
+
+function readClientError(err: unknown): string {
+  if (err instanceof TypeError && err.message.toLowerCase().includes("fetch")) {
+    return "Sunucuya ulaşılamadı. Backend'in çalıştığından ve API adresinin doğru olduğundan emin olun.";
+  }
+  return err instanceof Error ? err.message : "Form işlenemedi.";
 }
 
 function looksDuplicate(payload: Analysis): boolean {

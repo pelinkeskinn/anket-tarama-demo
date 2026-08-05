@@ -4,9 +4,11 @@ backend/server.log
 backend/server.err.log
 backend/data/demo.db
 backend/data/*.db
+backend/data/*.log
 frontend/node_modules/
 frontend/.next/
 frontend/coverage/
+frontend/*.log
 *.pyc
 __pycache__/
 
