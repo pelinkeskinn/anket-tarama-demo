@@ -68,6 +68,8 @@ export default function Page() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const submittingRef = useRef(false);
+  const activeAnalyzeRef = useRef<{ id: number; controller: AbortController } | null>(null);
+  const analyzeSequenceRef = useRef(0);
   const [screen, setScreen] = useState<Screen>("scanner");
   const [cameraState, setCameraState] = useState<"idle" | "ready" | "denied" | "unsupported">("idle");
   const [quality, setQuality] = useState<"bad" | "warn" | "ready">("bad");
@@ -165,29 +167,57 @@ export default function Page() {
       return;
     }
     submittingRef.current = true;
+    const requestId = analyzeSequenceRef.current + 1;
+    analyzeSequenceRef.current = requestId;
+    const controller = new AbortController();
+    activeAnalyzeRef.current = { id: requestId, controller };
     setError("");
     setScreen("processing");
     setProcessingText("Fotoğraf alındı.\nKağıdı kaldırabilirsiniz.");
     const slowTimer = window.setTimeout(() => setProcessingText("İşlem beklenenden uzun sürüyor."), 9000);
-    window.setTimeout(() => setProcessingText("Form işleniyor..."), 700);
+    const processingTimer = window.setTimeout(() => setProcessingText("Form işleniyor..."), 700);
 
     try {
       const body = new FormData();
       body.append("image", blob, "scan.jpg");
       body.append("clientRequestId", crypto.randomUUID());
-      const response = await fetch(`${API_BASE}/api/omr/analyze`, { method: "POST", body });
+      const response = await fetch(`${API_BASE}/api/omr/analyze`, { method: "POST", body, signal: controller.signal });
+      if (!isCurrentAnalyzeRequest(requestId)) {
+        return;
+      }
       if (!response.ok) {
         throw new Error(await extractError(response));
       }
       const payload = (await response.json()) as Analysis;
+      if (!isCurrentAnalyzeRequest(requestId)) {
+        return;
+      }
       handleAnalysis(payload);
     } catch (err) {
+      if (controller.signal.aborted || !isCurrentAnalyzeRequest(requestId)) {
+        return;
+      }
       setError(readClientError(err));
       setScreen("fatal");
     } finally {
       window.clearTimeout(slowTimer);
-      submittingRef.current = false;
+      window.clearTimeout(processingTimer);
+      if (activeAnalyzeRef.current?.id === requestId) {
+        activeAnalyzeRef.current = null;
+        submittingRef.current = false;
+      }
     }
+  }
+
+  function isCurrentAnalyzeRequest(requestId: number) {
+    return activeAnalyzeRef.current?.id === requestId && !activeAnalyzeRef.current.controller.signal.aborted;
+  }
+
+  function cancelAnalyzeAndReturnToScanner() {
+    activeAnalyzeRef.current?.controller.abort();
+    activeAnalyzeRef.current = null;
+    submittingRef.current = false;
+    setScreen("scanner");
   }
 
   function handleAnalysis(payload: Analysis) {
@@ -385,7 +415,7 @@ export default function Page() {
         </section>
       )}
 
-      {screen === "processing" && <StatusScreen title={processingText} button={processingText.includes("uzun") ? "Tekrar Dene" : undefined} onClick={() => setScreen("scanner")} />}
+      {screen === "processing" && <StatusScreen title={processingText} button={processingText.includes("uzun") ? "Tekrar Dene" : undefined} onClick={cancelAnalyzeAndReturnToScanner} />}
 
       {screen === "manual" && analysis && (
         <ManualReview answers={reviewAnswers} selections={manualSelections} onSelect={chooseManual} onContinue={continueManual} />
