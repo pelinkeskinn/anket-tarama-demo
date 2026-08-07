@@ -100,7 +100,8 @@ def _analysis_score(candidate: tuple[np.ndarray, dict[str, Any], list[AnswerResu
 def _needs_robust_read(answers: list[AnswerResult]) -> bool:
     uncertain_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
     blank_count = sum(1 for answer in answers if answer.status == "BLANK")
-    return uncertain_count > 0 or blank_count > 3
+    low_confidence_count = sum(1 for answer in answers if answer.status == "OK" and answer.confidence < 0.78)
+    return uncertain_count > 0 or blank_count > 0 or low_confidence_count > 4
 
 
 def _decode_image(image_bytes: bytes) -> np.ndarray:
@@ -433,14 +434,9 @@ def _order_points(points: np.ndarray) -> np.ndarray:
 
 def _read_answers(warped: np.ndarray, template: dict[str, Any]) -> list[AnswerResult]:
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    answers = _read_best_from_gray_variants(gray, template, use_local_search=False)
+    answers = _read_answers_from_gray(gray, template)
     if template.get("templateCode") == "KR_SURVEY_V1":
-        corrected = _read_best_from_gray_variants(
-            gray,
-            template,
-            shifts=_kizilay_right_column_curve_shifts(),
-            use_local_search=False,
-        )
+        corrected = _read_answers_from_gray(gray, template, _kizilay_right_column_curve_shifts())
         if _analysis_score((warped, template, corrected, 0, 0)) > _analysis_score((warped, template, answers, 0, 0)):
             return corrected
     return answers
@@ -487,8 +483,9 @@ def _gray_reading_variants(gray: np.ndarray) -> list[np.ndarray]:
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     variants.append(clahe.apply(gray))
 
-    variants.append(_normalize_illumination(gray))
-    variants.append(clahe.apply(_normalize_illumination(gray)))
+    normalized = _normalize_illumination(gray)
+    variants.append(normalized)
+    variants.append(clahe.apply(normalized))
 
     unique: list[np.ndarray] = []
     for variant in variants:

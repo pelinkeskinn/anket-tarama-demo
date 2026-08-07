@@ -4,6 +4,8 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
 const API_BASE = "";
 const MAX_MANUAL_REVIEW_QUESTIONS = 4;
+const MAX_CAPTURE_SIDE = 2200;
+const CAMERA_JPEG_QUALITY = 0.86;
 
 type AnswerValue = "NEVER" | "SOMETIMES" | "ALWAYS" | "BLANK";
 type AnswerStatus = "OK" | "BLANK" | "DOUBLE_MARK" | "UNCERTAIN";
@@ -185,13 +187,16 @@ export default function Page() {
       return;
     }
     const video = videoRef.current;
-    const canvas = document.createElement("canvas");
     const capture = fullCameraFrame(video);
+    const scale = Math.min(1, MAX_CAPTURE_SIDE / Math.max(capture.width, capture.height));
+    const canvas = document.createElement("canvas");
     canvas.width = capture.width;
     canvas.height = capture.height;
+    canvas.width = Math.max(1, Math.round(capture.width * scale));
+    canvas.height = Math.max(1, Math.round(capture.height * scale));
     const context = canvas.getContext("2d");
-    context?.drawImage(video, capture.x, capture.y, capture.width, capture.height, 0, 0, capture.width, capture.height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    context?.drawImage(video, capture.x, capture.y, capture.width, capture.height, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", CAMERA_JPEG_QUALITY));
     if (blob) {
       await analyzeBlob(blob);
     }
@@ -213,6 +218,7 @@ export default function Page() {
     const processingTimer = window.setTimeout(() => setProcessingText("Form işleniyor..."), 700);
 
     try {
+      await warmBackend();
       const body = new FormData();
       body.append("image", blob, "scan.jpg");
       body.append("clientRequestId", crypto.randomUUID());
@@ -241,6 +247,14 @@ export default function Page() {
         activeAnalyzeRef.current = null;
         submittingRef.current = false;
       }
+    }
+  }
+
+  async function warmBackend() {
+    try {
+      await fetch(`${API_BASE}/healthz`, { cache: "no-store" });
+    } catch {
+      // The analyze request below will show the real error if the backend is still unreachable.
     }
   }
 
