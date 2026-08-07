@@ -755,7 +755,7 @@ function cameraFrameCrop(video: HTMLVideoElement, shell: HTMLDivElement | null, 
   const displayedHeight = videoHeight * displayedScale;
   const hiddenX = (displayedWidth - shellRect.width) / 2;
   const hiddenY = (displayedHeight - shellRect.height) / 2;
-  const padding = Math.min(frameRect.width, frameRect.height) * 0.08;
+  const padding = Math.min(frameRect.width, frameRect.height) * 0.18;
 
   const frameLeft = frameRect.left - shellRect.left - padding;
   const frameTop = frameRect.top - shellRect.top - padding;

@@ -33,17 +33,26 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
     image = _decode_image(image_bytes)
     _validate_quality(image)
 
-    candidates: list[tuple[dict[str, Any], list[AnswerResult], int, int]] = []
+    candidates: list[tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int]] = []
     for oriented_image in _orientation_candidates(image):
         for template in load_templates():
             try:
-                candidates.append(_analyze_template(oriented_image, template))
+                template_result, answers, perspective_ms, omr_ms = _analyze_template(oriented_image, template)
+                candidates.append((oriented_image, template_result, answers, perspective_ms, omr_ms))
             except OmrError as exc:
                 if exc.code != "MARKERS_NOT_FOUND":
                     raise
     if not candidates:
         raise OmrError("MARKERS_NOT_FOUND")
-    template, answers, perspective_ms, omr_ms = max(candidates, key=_analysis_score)
+    selected_image, template, answers, perspective_ms, omr_ms = max(candidates, key=_analysis_score)
+    robust_start = time.perf_counter()
+    robust_answers = _read_answers_robust(_warp_to_template(selected_image, template), template)
+    robust_ms = _elapsed_ms(robust_start)
+    if _analysis_score((selected_image, template, robust_answers, perspective_ms, omr_ms)) > _analysis_score(
+        (selected_image, template, answers, perspective_ms, omr_ms)
+    ):
+        answers = robust_answers
+        omr_ms += robust_ms
 
     review_required_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
     blank_count = sum(1 for answer in answers if answer.status == "BLANK")
@@ -77,8 +86,8 @@ def _analyze_template(image: np.ndarray, template: dict[str, Any]) -> tuple[dict
     return template, answers, perspective_ms, omr_ms
 
 
-def _analysis_score(candidate: tuple[dict[str, Any], list[AnswerResult], int, int]) -> tuple[float, int]:
-    _, answers, _, _ = candidate
+def _analysis_score(candidate: tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int]) -> tuple[float, int]:
+    _, _, answers, _, _ = candidate
     review_required_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
     return (_form_confidence(answers), -review_required_count)
 
@@ -416,18 +425,33 @@ def _read_answers(warped: np.ndarray, template: dict[str, Any]) -> list[AnswerRe
     answers = _read_answers_from_gray(gray, template)
     if template.get("templateCode") == "KR_SURVEY_V1":
         corrected = _read_answers_from_gray(gray, template, _kizilay_right_column_curve_shifts())
-        if _analysis_score((template, corrected, 0, 0)) > _analysis_score((template, answers, 0, 0)):
+        if _analysis_score((warped, template, corrected, 0, 0)) > _analysis_score((warped, template, answers, 0, 0)):
             return corrected
     return answers
 
 
-def _read_answers_from_gray(gray: np.ndarray, template: dict[str, Any], shifts: dict[int, tuple[int, int]] | None = None) -> list[AnswerResult]:
+def _read_answers_robust(warped: np.ndarray, template: dict[str, Any]) -> list[AnswerResult]:
+    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    answers = _read_answers_from_gray(gray, template, use_local_search=True)
+    if template.get("templateCode") == "KR_SURVEY_V1":
+        corrected = _read_answers_from_gray(gray, template, _kizilay_right_column_curve_shifts(), use_local_search=True)
+        if _analysis_score((warped, template, corrected, 0, 0)) > _analysis_score((warped, template, answers, 0, 0)):
+            return corrected
+    return answers
+
+
+def _read_answers_from_gray(
+    gray: np.ndarray,
+    template: dict[str, Any],
+    shifts: dict[int, tuple[int, int]] | None = None,
+    use_local_search: bool = False,
+) -> list[AnswerResult]:
     answers: list[AnswerResult] = []
     for question in template["questions"]:
         question_no = int(question["questionNo"])
         dx, dy = shifts.get(question_no, (0, 0)) if shifts else (0, 0)
         densities = {
-            option: _mark_density(gray, _shift_box(box, dx, dy))
+            option: _best_mark_density(gray, _shift_box(box, dx, dy)) if use_local_search else _mark_density(gray, _shift_box(box, dx, dy))
             for option, box in question["options"].items()
             if option in OPTION_ORDER
         }
@@ -461,6 +485,19 @@ def _shift_box(box: dict[str, int], dx: int, dy: int) -> dict[str, int]:
         "width": int(box["width"]),
         "height": int(box["height"]),
     }
+
+
+def _best_mark_density(gray: np.ndarray, box: dict[str, int]) -> float:
+    width = int(box["width"])
+    height = int(box["height"])
+    search = max(14, min(width, height) // 4)
+    step = max(10, search // 2)
+    offsets = [0, -step, step, -search, search]
+    best = 0.0
+    for dy in offsets:
+        for dx in offsets:
+            best = max(best, _mark_density(gray, _shift_box(box, dx, dy)))
+    return best
 
 
 def _mark_density(gray: np.ndarray, box: dict[str, int]) -> float:
