@@ -89,10 +89,12 @@ def _analyze_template(image: np.ndarray, template: dict[str, Any]) -> tuple[dict
     return template, answers, perspective_ms, omr_ms
 
 
-def _analysis_score(candidate: tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int]) -> tuple[float, int]:
+def _analysis_score(candidate: tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int]) -> tuple[float, int, int, int]:
     _, _, answers, _, _ = candidate
+    ok_count = sum(1 for answer in answers if answer.status == "OK")
     review_required_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
-    return (_form_confidence(answers), -review_required_count)
+    blank_count = sum(1 for answer in answers if answer.status == "BLANK")
+    return (_form_confidence(answers), ok_count, -review_required_count, -blank_count)
 
 
 def _needs_robust_read(answers: list[AnswerResult]) -> bool:
@@ -431,9 +433,14 @@ def _order_points(points: np.ndarray) -> np.ndarray:
 
 def _read_answers(warped: np.ndarray, template: dict[str, Any]) -> list[AnswerResult]:
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    answers = _read_answers_from_gray(gray, template)
+    answers = _read_best_from_gray_variants(gray, template, use_local_search=False)
     if template.get("templateCode") == "KR_SURVEY_V1":
-        corrected = _read_answers_from_gray(gray, template, _kizilay_right_column_curve_shifts())
+        corrected = _read_best_from_gray_variants(
+            gray,
+            template,
+            shifts=_kizilay_right_column_curve_shifts(),
+            use_local_search=False,
+        )
         if _analysis_score((warped, template, corrected, 0, 0)) > _analysis_score((warped, template, answers, 0, 0)):
             return corrected
     return answers
@@ -441,12 +448,63 @@ def _read_answers(warped: np.ndarray, template: dict[str, Any]) -> list[AnswerRe
 
 def _read_answers_robust(warped: np.ndarray, template: dict[str, Any]) -> list[AnswerResult]:
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    answers = _read_answers_from_gray(gray, template, use_local_search=True)
+    answers = _read_best_from_gray_variants(gray, template, use_local_search=True)
     if template.get("templateCode") == "KR_SURVEY_V1":
-        corrected = _read_answers_from_gray(gray, template, _kizilay_right_column_curve_shifts(), use_local_search=True)
+        corrected = _read_best_from_gray_variants(
+            gray,
+            template,
+            shifts=_kizilay_right_column_curve_shifts(),
+            use_local_search=True,
+        )
         if _analysis_score((warped, template, corrected, 0, 0)) > _analysis_score((warped, template, answers, 0, 0)):
             return corrected
     return answers
+
+
+def _read_best_from_gray_variants(
+    gray: np.ndarray,
+    template: dict[str, Any],
+    shifts: dict[int, tuple[int, int]] | None = None,
+    use_local_search: bool = False,
+) -> list[AnswerResult]:
+    candidates = [
+        _read_answers_from_gray(variant, template, shifts=shifts, use_local_search=use_local_search)
+        for variant in _gray_reading_variants(gray)
+    ]
+    return max(candidates, key=_answers_quality_score)
+
+
+def _answers_quality_score(answers: list[AnswerResult]) -> tuple[int, int, float, int]:
+    ok_count = sum(1 for answer in answers if answer.status == "OK")
+    review_required_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
+    blank_count = sum(1 for answer in answers if answer.status == "BLANK")
+    return (ok_count, -review_required_count, _form_confidence(answers), -blank_count)
+
+
+def _gray_reading_variants(gray: np.ndarray) -> list[np.ndarray]:
+    variants = [gray]
+
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    variants.append(clahe.apply(gray))
+
+    variants.append(_normalize_illumination(gray))
+    variants.append(clahe.apply(_normalize_illumination(gray)))
+
+    unique: list[np.ndarray] = []
+    for variant in variants:
+        if not any(np.array_equal(variant, existing) for existing in unique):
+            unique.append(variant)
+    return unique
+
+
+def _normalize_illumination(gray: np.ndarray) -> np.ndarray:
+    short_side = min(gray.shape[:2])
+    kernel_size = max(31, int(short_side * 0.035))
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    background = cv2.GaussianBlur(gray, (kernel_size, kernel_size), 0)
+    normalized = cv2.divide(gray, background, scale=245)
+    return cv2.normalize(normalized, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
 
 def _read_answers_from_gray(
@@ -461,7 +519,8 @@ def _read_answers_from_gray(
         dx, dy = shifts.get(question_no, (0, 0)) if shifts else (0, 0)
         boxes = {option: _shift_box(box, dx, dy) for option, box in question["options"].items() if option in OPTION_ORDER}
         densities = {option: _mark_density(gray, box) for option, box in boxes.items()}
-        if use_local_search and _decide_question(question_no, densities).status in {"BLANK", "UNCERTAIN"}:
+        first_decision = _decide_question(question_no, densities)
+        if use_local_search and (first_decision.status in {"BLANK", "UNCERTAIN"} or first_decision.confidence < 0.78):
             densities = {option: _best_mark_density(gray, box, densities[option]) for option, box in boxes.items()}
         answers.append(_decide_question(question_no, densities))
     return answers
@@ -509,9 +568,14 @@ def _best_mark_density(gray: np.ndarray, box: dict[str, int], baseline: float) -
 
 def _mark_density(gray: np.ndarray, box: dict[str, int]) -> float:
     x, y, width, height = int(box["x"]), int(box["y"]), int(box["width"]), int(box["height"])
-    roi = gray[y : y + height, x : x + width]
+    y1 = max(0, y)
+    x1 = max(0, x)
+    y2 = min(gray.shape[0], y + height)
+    x2 = min(gray.shape[1], x + width)
+    roi = gray[y1:y2, x1:x2]
     if roi.size == 0:
         return 0.0
+    height, width = roi.shape[:2]
 
     yy, xx = np.ogrid[:height, :width]
     distance = (xx - width / 2) ** 2 + (yy - height / 2) ** 2
@@ -529,7 +593,14 @@ def _mark_density(gray: np.ndarray, box: dict[str, int]) -> float:
     dark_pixel_ratio = float(np.mean(normalized > 0.10))
     darkest_pixels = np.sort(normalized.reshape(-1))[int(normalized.size * 0.8) :]
     darkest_mean = float(np.mean(darkest_pixels)) if darkest_pixels.size else 0.0
-    score = dark_pixel_ratio * 0.55 + darkest_mean * 0.45
+
+    center_float = center.astype(np.float32)
+    background_float = background.astype(np.float32)
+    local_delta = max(0.0, (float(np.median(background_float)) - float(np.percentile(center_float, 35))) / 255.0)
+    threshold = max(12.0, float(np.median(background_float)) - 22.0)
+    locally_dark_ratio = float(np.mean(center_float < threshold))
+
+    score = dark_pixel_ratio * 0.42 + darkest_mean * 0.34 + local_delta * 0.14 + locally_dark_ratio * 0.10
     return round(float(np.clip(score, 0, 1)), 4)
 
 

@@ -66,8 +66,6 @@ const demoForms = [
 
 export default function Page() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const cameraShellRef = useRef<HTMLDivElement | null>(null);
-  const frameRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const submittingRef = useRef(false);
   const activeAnalyzeRef = useRef<{ id: number; controller: AbortController } | null>(null);
@@ -188,11 +186,11 @@ export default function Page() {
     }
     const video = videoRef.current;
     const canvas = document.createElement("canvas");
-    const crop = cameraFrameCrop(video, cameraShellRef.current, frameRef.current);
-    canvas.width = crop.width;
-    canvas.height = crop.height;
+    const capture = fullCameraFrame(video);
+    canvas.width = capture.width;
+    canvas.height = capture.height;
     const context = canvas.getContext("2d");
-    context?.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+    context?.drawImage(video, capture.x, capture.y, capture.width, capture.height, 0, 0, capture.width, capture.height);
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
     if (blob) {
       await analyzeBlob(blob);
@@ -408,13 +406,13 @@ export default function Page() {
       <Header scannedCount={scannedCount} onHistory={loadHistory} />
       {screen === "scanner" && (
         <section className="scan">
-          <div className="camera-shell" ref={cameraShellRef}>
+          <div className="camera-shell">
             {cameraState === "ready" ? (
               <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => void attachCameraStream()} />
             ) : (
               <CameraFallback state={cameraState} onRequest={requestCamera} />
             )}
-            <div ref={frameRef} className={`frame ${quality}`} aria-label="A4 hizalama çerçevesi">
+            <div className={`frame ${quality}`} aria-label="A4 hizalama çerçevesi">
               <span className="corner tl" />
               <span className="corner tr" />
               <span className="corner br" />
@@ -737,46 +735,10 @@ function rememberSequence(payload: Analysis) {
   localStorage.setItem("demoAnswerSequences", JSON.stringify([current, ...previous].slice(0, 20)));
 }
 
-function cameraFrameCrop(video: HTMLVideoElement, shell: HTMLDivElement | null, frame: HTMLDivElement | null) {
+function fullCameraFrame(video: HTMLVideoElement) {
   const videoWidth = video.videoWidth || 1920;
   const videoHeight = video.videoHeight || 1080;
-  if (!shell || !frame) {
-    return { x: 0, y: 0, width: videoWidth, height: videoHeight };
-  }
-
-  const shellRect = shell.getBoundingClientRect();
-  const frameRect = frame.getBoundingClientRect();
-  if (shellRect.width <= 0 || shellRect.height <= 0 || frameRect.width <= 0 || frameRect.height <= 0) {
-    return { x: 0, y: 0, width: videoWidth, height: videoHeight };
-  }
-
-  const displayedScale = Math.max(shellRect.width / videoWidth, shellRect.height / videoHeight);
-  const displayedWidth = videoWidth * displayedScale;
-  const displayedHeight = videoHeight * displayedScale;
-  const hiddenX = (displayedWidth - shellRect.width) / 2;
-  const hiddenY = (displayedHeight - shellRect.height) / 2;
-  const padding = Math.min(frameRect.width, frameRect.height) * 0.18;
-
-  const frameLeft = frameRect.left - shellRect.left - padding;
-  const frameTop = frameRect.top - shellRect.top - padding;
-  const frameRight = frameRect.right - shellRect.left + padding;
-  const frameBottom = frameRect.bottom - shellRect.top + padding;
-
-  const x = clamp((frameLeft + hiddenX) / displayedScale, 0, videoWidth - 1);
-  const y = clamp((frameTop + hiddenY) / displayedScale, 0, videoHeight - 1);
-  const right = clamp((frameRight + hiddenX) / displayedScale, x + 1, videoWidth);
-  const bottom = clamp((frameBottom + hiddenY) / displayedScale, y + 1, videoHeight);
-
-  return {
-    x: Math.round(x),
-    y: Math.round(y),
-    width: Math.max(1, Math.round(right - x)),
-    height: Math.max(1, Math.round(bottom - y))
-  };
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
+  return { x: 0, y: 0, width: videoWidth, height: videoHeight };
 }
 
 function sequence(payload: Analysis): string {
