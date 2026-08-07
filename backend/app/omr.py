@@ -37,9 +37,13 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
 
     candidates: list[tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int]] = []
     for oriented_image in _orientation_candidates(image):
+        warp_sources: dict[float, tuple[np.ndarray, bool]] = {}
         for template in load_templates():
             try:
-                template_result, answers, perspective_ms, omr_ms = _analyze_template(oriented_image, template)
+                aspect_key = round(float(template["pageWidth"]) / float(template["pageHeight"]), 4)
+                if aspect_key not in warp_sources:
+                    warp_sources[aspect_key] = _find_warp_source(oriented_image, template)
+                template_result, answers, perspective_ms, omr_ms = _analyze_template(oriented_image, template, warp_sources[aspect_key])
                 candidates.append((oriented_image, template_result, answers, perspective_ms, omr_ms))
             except OmrError as exc:
                 if exc.code != "MARKERS_NOT_FOUND":
@@ -78,9 +82,13 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
     )
 
 
-def _analyze_template(image: np.ndarray, template: dict[str, Any]) -> tuple[dict[str, Any], list[AnswerResult], int, int]:
+def _analyze_template(
+    image: np.ndarray,
+    template: dict[str, Any],
+    warp_source: tuple[np.ndarray, bool] | None = None,
+) -> tuple[dict[str, Any], list[AnswerResult], int, int]:
     perspective_start = time.perf_counter()
-    warped = _warp_to_template(image, template)
+    warped = _warp_to_template(image, template, warp_source)
     perspective_ms = _elapsed_ms(perspective_start)
 
     omr_start = time.perf_counter()
@@ -135,7 +143,7 @@ def _validate_quality(image: np.ndarray) -> None:
         raise OmrError("IMAGE_BLURRY")
 
 
-def _warp_to_template(image: np.ndarray, template: dict[str, Any]) -> np.ndarray:
+def _warp_to_template(image: np.ndarray, template: dict[str, Any], warp_source: tuple[np.ndarray, bool] | None = None) -> np.ndarray:
     marker_size = float(template["markerSize"])
     marker_margin = float(template["markerMargin"])
     page_width = float(template["pageWidth"])
@@ -150,10 +158,8 @@ def _warp_to_template(image: np.ndarray, template: dict[str, Any]) -> np.ndarray
         ],
         dtype=np.float32,
     )
-    try:
-        source = _find_marker_centers(image, page_width / page_height)
-    except OmrError:
-        source = _find_page_corners(image, page_width / page_height)
+    source, uses_page_corners = warp_source if warp_source is not None else _find_warp_source(image, template)
+    if uses_page_corners:
         destination = np.array(
             [
                 [0, 0],
@@ -166,6 +172,15 @@ def _warp_to_template(image: np.ndarray, template: dict[str, Any]) -> np.ndarray
 
     transform = cv2.getPerspectiveTransform(source, destination)
     return cv2.warpPerspective(image, transform, (int(page_width), int(page_height)))
+
+
+def _find_warp_source(image: np.ndarray, template: dict[str, Any]) -> tuple[np.ndarray, bool]:
+    page_width = float(template["pageWidth"])
+    page_height = float(template["pageHeight"])
+    try:
+        return _find_marker_centers(image, page_width / page_height), False
+    except OmrError:
+        return _find_page_corners(image, page_width / page_height), True
 
 
 def _find_marker_centers(image: np.ndarray, target_aspect: float) -> np.ndarray:
