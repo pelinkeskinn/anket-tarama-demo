@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import cv2
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 
@@ -24,6 +25,16 @@ OPTION_OFFSETS = {"NEVER": 360, "SOMETIMES": 585, "ALWAYS": 810}
 START_Y = 820
 ROW_GAP = 145
 LABELS = {"NEVER": "Hicbir zaman", "SOMETIMES": "Bazen", "ALWAYS": "Her zaman"}
+V2_MARKER_IDS = {"topLeft": 10, "topRight": 11, "bottomRight": 12, "bottomLeft": 13}
+V2_MARKER_SIZE = 180
+V2_MARKER_MARGIN = 120
+V2_BOX = 130
+V2_RADIUS = 56
+V2_LEFT_X = 220
+V2_RIGHT_X = 1300
+V2_OPTION_OFFSETS = {"NEVER": 390, "SOMETIMES": 640, "ALWAYS": 890}
+V2_START_Y = 840
+V2_ROW_GAP = 152
 
 
 def font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -44,12 +55,24 @@ def option_box(cx: int, cy: int) -> dict[str, int]:
     return {"x": cx - BOX // 2, "y": cy - BOX // 2, "width": BOX, "height": BOX}
 
 
+def v2_option_box(cx: int, cy: int) -> dict[str, int]:
+    return {"x": cx - V2_BOX // 2, "y": cy - V2_BOX // 2, "width": V2_BOX, "height": V2_BOX}
+
+
 def question_position(question_no: int) -> tuple[int, int]:
     if question_no <= 13:
         row = question_no - 1
         return LEFT_X, START_Y + row * ROW_GAP
     row = question_no - 14
     return RIGHT_X, START_Y + row * ROW_GAP
+
+
+def v2_question_position(question_no: int) -> tuple[int, int]:
+    if question_no <= 13:
+        row = question_no - 1
+        return V2_LEFT_X, V2_START_Y + row * V2_ROW_GAP
+    row = question_no - 14
+    return V2_RIGHT_X, V2_START_Y + row * V2_ROW_GAP
 
 
 def build_template() -> dict[str, object]:
@@ -67,6 +90,28 @@ def build_template() -> dict[str, object]:
         "pageHeight": PAGE_H,
         "markerMargin": MARKER_MARGIN,
         "markerSize": MARKER_SIZE,
+        "questionCount": QUESTION_COUNT,
+        "questions": questions,
+    }
+
+
+def build_v2_template() -> dict[str, object]:
+    questions = []
+    for question_no in range(1, QUESTION_COUNT + 1):
+        column_x, y = v2_question_position(question_no)
+        options = {
+            key: v2_option_box(column_x + offset, y)
+            for key, offset in V2_OPTION_OFFSETS.items()
+        }
+        questions.append({"questionNo": question_no, "options": options})
+    return {
+        "templateCode": "OMR_SURVEY_V2",
+        "pageWidth": PAGE_W,
+        "pageHeight": PAGE_H,
+        "markerMargin": V2_MARKER_MARGIN,
+        "markerSize": V2_MARKER_SIZE,
+        "markerType": "ARUCO_4X4_50",
+        "markerIds": V2_MARKER_IDS,
         "questionCount": QUESTION_COUNT,
         "questions": questions,
     }
@@ -94,6 +139,28 @@ def draw_blank() -> Image.Image:
     return image
 
 
+def draw_blank_v2() -> Image.Image:
+    image = Image.new("RGB", (PAGE_W, PAGE_H), "white")
+    draw = ImageDraw.Draw(image)
+    draw_aruco_markers(image)
+    draw.text((260, 215), "Profesyonel OMR Anket Formu V2", fill="black", font=font(66))
+    draw.text((260, 315), "Daireleri tamamen doldurun. Kose markerlarini kesmeyin.", fill="black", font=font(36))
+    draw.text((260, 420), "Sablon: OMR_SURVEY_V2", fill="black", font=font(30))
+
+    for column_x in (V2_LEFT_X, V2_RIGHT_X):
+        for key, offset in V2_OPTION_OFFSETS.items():
+            cx = column_x + offset
+            draw.text((cx - 90, 620), LABELS[key], fill="black", font=font(30))
+
+    for question_no in range(1, QUESTION_COUNT + 1):
+        column_x, y = v2_question_position(question_no)
+        draw.text((column_x, y - 24), f"{question_no}. Soru metni", fill="black", font=font(34))
+        for offset in V2_OPTION_OFFSETS.values():
+            cx = column_x + offset
+            draw.ellipse((cx - V2_RADIUS, y - V2_RADIUS, cx + V2_RADIUS, y + V2_RADIUS), outline="black", width=7)
+    return image
+
+
 def draw_markers(draw: ImageDraw.ImageDraw) -> None:
     positions = [
         (MARKER_MARGIN, MARKER_MARGIN),
@@ -103,6 +170,20 @@ def draw_markers(draw: ImageDraw.ImageDraw) -> None:
     ]
     for x, y in positions:
         draw.rectangle((x, y, x + MARKER_SIZE, y + MARKER_SIZE), fill="black")
+
+
+def draw_aruco_markers(image: Image.Image) -> None:
+    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+    positions = {
+        "topLeft": (V2_MARKER_MARGIN, V2_MARKER_MARGIN),
+        "topRight": (PAGE_W - V2_MARKER_MARGIN - V2_MARKER_SIZE, V2_MARKER_MARGIN),
+        "bottomRight": (PAGE_W - V2_MARKER_MARGIN - V2_MARKER_SIZE, PAGE_H - V2_MARKER_MARGIN - V2_MARKER_SIZE),
+        "bottomLeft": (V2_MARKER_MARGIN, PAGE_H - V2_MARKER_MARGIN - V2_MARKER_SIZE),
+    }
+    for key, (x, y) in positions.items():
+        marker = cv2.aruco.generateImageMarker(dictionary, V2_MARKER_IDS[key], V2_MARKER_SIZE)
+        marker_image = Image.fromarray(marker).convert("RGB")
+        image.paste(marker_image, (x, y))
 
 
 def fill_form(answers: dict[int, str | list[str]], faint: set[int] | None = None, erased: set[int] | None = None) -> Image.Image:
@@ -125,6 +206,26 @@ def fill_form(answers: dict[int, str | list[str]], faint: set[int] | None = None
             if question_no in erased:
                 draw.ellipse((cx - 22, y - 22, cx + 22, y + 22), fill=(230, 230, 230))
                 draw.line((cx - 42, y + 34, cx + 42, y - 34), fill=(165, 165, 165), width=8)
+    return image
+
+
+def fill_form_v2(answers: dict[int, str | list[str]], faint: set[int] | None = None, erased: set[int] | None = None) -> Image.Image:
+    image = draw_blank_v2()
+    draw = ImageDraw.Draw(image)
+    faint = faint or set()
+    erased = erased or set()
+    for question_no, answer in answers.items():
+        selected = answer if isinstance(answer, list) else [answer]
+        column_x, y = v2_question_position(question_no)
+        for option in selected:
+            if option == "BLANK":
+                continue
+            cx = column_x + V2_OPTION_OFFSETS[option]
+            fill = (205, 205, 205) if question_no in faint else "black"
+            draw.ellipse((cx - V2_RADIUS + 10, y - V2_RADIUS + 10, cx + V2_RADIUS - 10, y + V2_RADIUS - 10), fill=fill)
+            if question_no in erased:
+                draw.ellipse((cx - 26, y - 26, cx + 26, y + 26), fill=(230, 230, 230))
+                draw.line((cx - 48, y + 38, cx + 48, y - 38), fill=(165, 165, 165), width=9)
     return image
 
 
@@ -205,6 +306,18 @@ def save_all() -> None:
         "filled-erased-mark.png": {str(k): v for k, v in clean_answers.items()},
     }
     (SAMPLES / "expected-results.json").write_text(json.dumps(expected, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    save_v2()
+
+
+def save_v2() -> None:
+    blank = draw_blank_v2()
+    blank.save(SAMPLES / "blank-form-v2.png")
+    blank.save(SAMPLES / "blank-form-v2.pdf", "PDF", resolution=300.0)
+
+    clean_answers = base_answers()
+    fill_form_v2(clean_answers).save(SAMPLES / "filled-clean-v2.png")
+    fill_form_v2(clean_answers, faint={5, 14}).save(SAMPLES / "filled-faint-v2.png")
 
 
 if __name__ == "__main__":

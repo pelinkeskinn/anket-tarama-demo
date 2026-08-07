@@ -180,10 +180,51 @@ def _warp_to_template(image: np.ndarray, template: dict[str, Any], warp_source: 
 def _find_warp_source(image: np.ndarray, template: dict[str, Any]) -> tuple[np.ndarray, bool]:
     page_width = float(template["pageWidth"])
     page_height = float(template["pageHeight"])
+    aruco_markers = _find_aruco_marker_centers(image, template)
+    if aruco_markers is not None:
+        return aruco_markers, False
     try:
         return _find_marker_centers(image, page_width / page_height), False
     except OmrError:
         return _find_page_corners(image, page_width / page_height), True
+
+
+def _find_aruco_marker_centers(image: np.ndarray, template: dict[str, Any]) -> np.ndarray | None:
+    marker_ids = template.get("markerIds")
+    if not isinstance(marker_ids, dict):
+        return None
+    aruco = getattr(cv2, "aruco", None)
+    if aruco is None:
+        return None
+
+    dictionary_name = str(template.get("markerType", "ARUCO_4X4_50"))
+    dictionary_id = getattr(aruco, f"DICT_{dictionary_name}", None)
+    if dictionary_id is None:
+        return None
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    dictionary = aruco.getPredefinedDictionary(dictionary_id)
+    parameters = aruco.DetectorParameters()
+    detector = aruco.ArucoDetector(dictionary, parameters)
+    corners, ids, _ = detector.detectMarkers(gray)
+    if ids is None:
+        return None
+
+    found: dict[int, np.ndarray] = {}
+    for marker_corners, marker_id in zip(corners, ids.flatten()):
+        found[int(marker_id)] = np.mean(marker_corners.reshape(4, 2), axis=0).astype(np.float32)
+
+    keys = ("topLeft", "topRight", "bottomRight", "bottomLeft")
+    try:
+        ordered = np.array([found[int(marker_ids[key])] for key in keys], dtype=np.float32)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    if len({tuple(point) for point in ordered}) < 4:
+        return None
+    if not _has_consistent_edges(ordered):
+        return None
+    return ordered
 
 
 def _scaled_template(template: dict[str, Any], scale: float) -> dict[str, Any]:

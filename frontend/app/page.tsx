@@ -56,6 +56,8 @@ const labels: Record<AnswerValue | AnswerStatus, string> = {
 };
 
 const demoForms = [
+  ["filled-clean-v2.png", "V2 profesyonel form"],
+  ["filled-faint-v2.png", "V2 soluk işaretli form"],
   ["filled-clean.png", "Temiz form"],
   ["filled-with-blanks.png", "Boş cevaplı form"],
   ["filled-double-mark.png", "Çift işaretli form"],

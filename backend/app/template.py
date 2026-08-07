@@ -19,10 +19,19 @@ def load_template() -> dict[str, Any]:
 
 @lru_cache
 def load_templates() -> list[dict[str, Any]]:
-    return [load_template(), _kizilay_survey_v1_template()]
+    return [_omr_survey_v2_template(), load_template(), _kizilay_survey_v1_template()]
 
 
 def _option_box(center_x: int, center_y: int, size: int = 112) -> dict[str, int]:
+    return {
+        "x": center_x - size // 2,
+        "y": center_y - size // 2,
+        "width": size,
+        "height": size,
+    }
+
+
+def _v2_option_box(center_x: int, center_y: int, size: int = 130) -> dict[str, int]:
     return {
         "x": center_x - size // 2,
         "y": center_y - size // 2,
@@ -39,6 +48,50 @@ def _question(question_no: int, centers: tuple[tuple[int, int], tuple[int, int],
             "SOMETIMES": _option_box(*centers[1]),
             "ALWAYS": _option_box(*centers[2]),
         },
+    }
+
+
+def _omr_survey_v2_template() -> dict[str, Any]:
+    option_offsets = {"NEVER": 390, "SOMETIMES": 640, "ALWAYS": 890}
+    left_x = 220
+    right_x = 1300
+    start_y = 840
+    row_gap = 152
+
+    questions = []
+    for question_no in range(1, 26):
+        if question_no <= 13:
+            column_x = left_x
+            row = question_no - 1
+        else:
+            column_x = right_x
+            row = question_no - 14
+        y = start_y + row * row_gap
+        questions.append(
+            {
+                "questionNo": question_no,
+                "options": {
+                    option: _v2_option_box(column_x + offset, y)
+                    for option, offset in option_offsets.items()
+                },
+            }
+        )
+
+    return {
+        "templateCode": "OMR_SURVEY_V2",
+        "pageWidth": 2480,
+        "pageHeight": 3508,
+        "markerMargin": 120,
+        "markerSize": 180,
+        "markerType": "ARUCO_4X4_50",
+        "markerIds": {
+            "topLeft": 10,
+            "topRight": 11,
+            "bottomRight": 12,
+            "bottomLeft": 13,
+        },
+        "questionCount": 25,
+        "questions": questions,
     }
 
 

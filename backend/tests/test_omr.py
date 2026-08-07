@@ -104,6 +104,24 @@ def test_clean_form_is_read_correctly() -> None:
     assert response.status == "OK"
 
 
+def test_v2_aruco_form_is_read_correctly() -> None:
+    expected = json.loads((ROOT / "sample-forms" / "expected-results.json").read_text(encoding="utf-8"))["filled-clean.png"]
+    response = analyze_image_bytes(image_bytes("filled-clean-v2.png"))
+    values = {str(answer.questionNo): answer.value for answer in response.answers}
+    assert response.templateCode == "OMR_SURVEY_V2"
+    assert response.status == "OK"
+    assert values == expected
+
+
+def test_v2_faint_marks_are_read_correctly() -> None:
+    response = analyze_image_bytes(image_bytes("filled-faint-v2.png"))
+    values = {answer.questionNo: answer.value for answer in response.answers}
+    assert response.templateCode == "OMR_SURVEY_V2"
+    assert response.status == "OK"
+    assert values[5] == "SOMETIMES"
+    assert values[14] == "SOMETIMES"
+
+
 def test_low_resolution_manual_upload_is_read_correctly() -> None:
     response = analyze_image_bytes(resized_image_bytes("filled-clean.png", 500))
     assert response.status == "OK"

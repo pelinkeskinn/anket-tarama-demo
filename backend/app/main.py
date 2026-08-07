@@ -90,6 +90,9 @@ def sample_form(filename: str) -> FileResponse:
         "filled-perspective.png",
         "filled-shadow.png",
         "filled-blurry.png",
+        "blank-form-v2.png",
+        "filled-clean-v2.png",
+        "filled-faint-v2.png",
     }
     if filename not in allowed:
         raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Demo görsel bulunamadı."}})
