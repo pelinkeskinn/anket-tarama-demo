@@ -25,6 +25,7 @@ from app.template import load_templates
 OPTION_ORDER = ("NEVER", "SOMETIMES", "ALWAYS")
 MAX_ACCEPTED_BLANK_ANSWERS = 8
 LOW_CONTRAST_MARK_THRESHOLD = 0.12
+ANALYSIS_SCALE = 0.8
 
 
 def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
@@ -53,7 +54,8 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
     selected_image, template, answers, perspective_ms, omr_ms = max(candidates, key=_analysis_score)
     if _needs_robust_read(answers):
         robust_start = time.perf_counter()
-        robust_answers = _read_answers_robust(_warp_to_template(selected_image, template), template)
+        reading_template = _scaled_template(template, ANALYSIS_SCALE)
+        robust_answers = _read_answers_robust(_warp_to_template(selected_image, reading_template), reading_template)
         robust_ms = _elapsed_ms(robust_start)
         if _analysis_score((selected_image, template, robust_answers, perspective_ms, omr_ms)) > _analysis_score(
             (selected_image, template, answers, perspective_ms, omr_ms)
@@ -87,12 +89,13 @@ def _analyze_template(
     template: dict[str, Any],
     warp_source: tuple[np.ndarray, bool] | None = None,
 ) -> tuple[dict[str, Any], list[AnswerResult], int, int]:
+    reading_template = _scaled_template(template, ANALYSIS_SCALE)
     perspective_start = time.perf_counter()
-    warped = _warp_to_template(image, template, warp_source)
+    warped = _warp_to_template(image, reading_template, warp_source)
     perspective_ms = _elapsed_ms(perspective_start)
 
     omr_start = time.perf_counter()
-    answers = _read_answers(warped, template)
+    answers = _read_answers(warped, reading_template)
     omr_ms = _elapsed_ms(omr_start)
     return template, answers, perspective_ms, omr_ms
 
@@ -181,6 +184,33 @@ def _find_warp_source(image: np.ndarray, template: dict[str, Any]) -> tuple[np.n
         return _find_marker_centers(image, page_width / page_height), False
     except OmrError:
         return _find_page_corners(image, page_width / page_height), True
+
+
+def _scaled_template(template: dict[str, Any], scale: float) -> dict[str, Any]:
+    if scale == 1:
+        return template
+    return {
+        **template,
+        "pageWidth": int(round(float(template["pageWidth"]) * scale)),
+        "pageHeight": int(round(float(template["pageHeight"]) * scale)),
+        "markerMargin": int(round(float(template["markerMargin"]) * scale)),
+        "markerSize": int(round(float(template["markerSize"]) * scale)),
+        "questions": [
+            {
+                **question,
+                "options": {
+                    option: {
+                        "x": int(round(float(box["x"]) * scale)),
+                        "y": int(round(float(box["y"]) * scale)),
+                        "width": max(1, int(round(float(box["width"]) * scale))),
+                        "height": max(1, int(round(float(box["height"]) * scale))),
+                    }
+                    for option, box in question["options"].items()
+                },
+            }
+            for question in template["questions"]
+        ],
+    }
 
 
 def _find_marker_centers(image: np.ndarray, target_aspect: float) -> np.ndarray:
