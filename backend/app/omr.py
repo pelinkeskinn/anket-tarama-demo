@@ -23,6 +23,8 @@ from app.template import load_templates
 
 
 OPTION_ORDER = ("NEVER", "SOMETIMES", "ALWAYS")
+MAX_ACCEPTED_BLANK_ANSWERS = 8
+LOW_CONTRAST_MARK_THRESHOLD = 0.12
 
 
 def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
@@ -58,7 +60,7 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
     blank_count = sum(1 for answer in answers if answer.status == "BLANK")
     form_confidence = _form_confidence(answers)
     status = "OK"
-    if review_required_count > MAX_MANUAL_REVIEW_QUESTIONS:
+    if review_required_count > MAX_MANUAL_REVIEW_QUESTIONS or blank_count > MAX_ACCEPTED_BLANK_ANSWERS:
         status = "TOO_MANY_UNCERTAIN"
     elif review_required_count > 0:
         status = "REVIEW_REQUIRED"
@@ -530,20 +532,25 @@ def _decide_question(question_no: int, densities: dict[str, float]) -> AnswerRes
     ranked = sorted(densities.items(), key=lambda item: item[1], reverse=True)
     top_option, top_density = ranked[0]
     second_density = ranked[1][1]
+    margin = top_density - second_density
     marked = [option for option, density in ranked if density >= DOUBLE_MARK_THRESHOLD]
 
     if len(marked) >= 2:
         return AnswerResult(questionNo=question_no, value=None, confidence=_double_confidence(ranked), source="UNRESOLVED", status="DOUBLE_MARK")
 
-    if top_density < EMPTY_THRESHOLD:
+    if top_density < EMPTY_THRESHOLD and (top_density < LOW_CONTRAST_MARK_THRESHOLD or margin < UNCERTAIN_MARGIN):
         confidence = min(1.0, 1.0 - top_density / max(EMPTY_THRESHOLD, 0.01))
         return AnswerResult(questionNo=question_no, value="BLANK", confidence=round(confidence, 3), source="AUTO", status="BLANK")
 
-    if top_density < MARK_THRESHOLD or (top_density - second_density) < UNCERTAIN_MARGIN:
+    if top_density < MARK_THRESHOLD and margin >= UNCERTAIN_MARGIN and top_density >= LOW_CONTRAST_MARK_THRESHOLD:
+        confidence = min(0.82, 0.58 + margin * 1.2)
+        return AnswerResult(questionNo=question_no, value=top_option, confidence=round(confidence, 3), source="AUTO", status="OK")
+
+    if top_density < MARK_THRESHOLD or margin < UNCERTAIN_MARGIN:
         confidence = min(0.69, max(0.35, top_density))
         return AnswerResult(questionNo=question_no, value=None, confidence=round(confidence, 3), source="UNRESOLVED", status="UNCERTAIN")
 
-    confidence = min(1.0, 0.72 + (top_density - MARK_THRESHOLD) * 0.45 + (top_density - second_density) * 0.35)
+    confidence = min(1.0, 0.72 + (top_density - MARK_THRESHOLD) * 0.45 + margin * 0.35)
     return AnswerResult(questionNo=question_no, value=top_option, confidence=round(confidence, 3), source="AUTO", status="OK")
 
 

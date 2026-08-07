@@ -98,13 +98,13 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    if (cameraState === "ready" && videoRef.current && streamRef.current) {
+    if (cameraState === "ready" && screen === "scanner" && videoRef.current && streamRef.current) {
       const animationFrame = window.requestAnimationFrame(() => {
         void attachCameraStream();
       });
       return () => window.cancelAnimationFrame(animationFrame);
     }
-  }, [cameraState]);
+  }, [cameraState, screen]);
 
   useEffect(() => {
     if (cameraState !== "ready" || screen !== "scanner") {
