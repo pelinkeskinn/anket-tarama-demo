@@ -47,14 +47,15 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
     if not candidates:
         raise OmrError("MARKERS_NOT_FOUND")
     selected_image, template, answers, perspective_ms, omr_ms = max(candidates, key=_analysis_score)
-    robust_start = time.perf_counter()
-    robust_answers = _read_answers_robust(_warp_to_template(selected_image, template), template)
-    robust_ms = _elapsed_ms(robust_start)
-    if _analysis_score((selected_image, template, robust_answers, perspective_ms, omr_ms)) > _analysis_score(
-        (selected_image, template, answers, perspective_ms, omr_ms)
-    ):
-        answers = robust_answers
-        omr_ms += robust_ms
+    if _needs_robust_read(answers):
+        robust_start = time.perf_counter()
+        robust_answers = _read_answers_robust(_warp_to_template(selected_image, template), template)
+        robust_ms = _elapsed_ms(robust_start)
+        if _analysis_score((selected_image, template, robust_answers, perspective_ms, omr_ms)) > _analysis_score(
+            (selected_image, template, answers, perspective_ms, omr_ms)
+        ):
+            answers = robust_answers
+            omr_ms += robust_ms
 
     review_required_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
     blank_count = sum(1 for answer in answers if answer.status == "BLANK")
@@ -92,6 +93,12 @@ def _analysis_score(candidate: tuple[np.ndarray, dict[str, Any], list[AnswerResu
     _, _, answers, _, _ = candidate
     review_required_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
     return (_form_confidence(answers), -review_required_count)
+
+
+def _needs_robust_read(answers: list[AnswerResult]) -> bool:
+    uncertain_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
+    blank_count = sum(1 for answer in answers if answer.status == "BLANK")
+    return uncertain_count > 0 or blank_count > 3
 
 
 def _decode_image(image_bytes: bytes) -> np.ndarray:
@@ -452,11 +459,10 @@ def _read_answers_from_gray(
     for question in template["questions"]:
         question_no = int(question["questionNo"])
         dx, dy = shifts.get(question_no, (0, 0)) if shifts else (0, 0)
-        densities = {
-            option: _best_mark_density(gray, _shift_box(box, dx, dy)) if use_local_search else _mark_density(gray, _shift_box(box, dx, dy))
-            for option, box in question["options"].items()
-            if option in OPTION_ORDER
-        }
+        boxes = {option: _shift_box(box, dx, dy) for option, box in question["options"].items() if option in OPTION_ORDER}
+        densities = {option: _mark_density(gray, box) for option, box in boxes.items()}
+        if use_local_search and _decide_question(question_no, densities).status in {"BLANK", "UNCERTAIN"}:
+            densities = {option: _best_mark_density(gray, box, densities[option]) for option, box in boxes.items()}
         answers.append(_decide_question(question_no, densities))
     return answers
 
@@ -489,13 +495,12 @@ def _shift_box(box: dict[str, int], dx: int, dy: int) -> dict[str, int]:
     }
 
 
-def _best_mark_density(gray: np.ndarray, box: dict[str, int]) -> float:
+def _best_mark_density(gray: np.ndarray, box: dict[str, int], baseline: float) -> float:
     width = int(box["width"])
     height = int(box["height"])
-    search = max(14, min(width, height) // 4)
-    step = max(10, search // 2)
-    offsets = [0, -step, step, -search, search]
-    best = 0.0
+    step = max(10, min(width, height) // 6)
+    offsets = [0, -step, step]
+    best = baseline
     for dy in offsets:
         for dx in offsets:
             best = max(best, _mark_density(gray, _shift_box(box, dx, dy)))
