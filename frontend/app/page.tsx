@@ -97,7 +97,10 @@ export default function Page() {
 
   useEffect(() => {
     if (cameraState === "ready" && videoRef.current && streamRef.current) {
-      videoRef.current.srcObject = streamRef.current;
+      const animationFrame = window.requestAnimationFrame(() => {
+        void attachCameraStream();
+      });
+      return () => window.cancelAnimationFrame(animationFrame);
     }
   }, [cameraState]);
 
@@ -146,12 +149,26 @@ export default function Page() {
         audio: false
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
       setCameraState("ready");
+      await attachCameraStream();
     } catch {
       setCameraState("denied");
+    }
+  }
+
+  async function attachCameraStream() {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) {
+      return;
+    }
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+    }
+    try {
+      await video.play();
+    } catch {
+      // Some mobile browsers only allow playback after the element finishes loading metadata.
     }
   }
 
@@ -387,7 +404,7 @@ export default function Page() {
         <section className="scan">
           <div className="camera-shell">
             {cameraState === "ready" ? (
-              <video ref={videoRef} autoPlay playsInline muted />
+              <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => void attachCameraStream()} />
             ) : (
               <CameraFallback state={cameraState} onRequest={requestCamera} />
             )}
