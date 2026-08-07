@@ -96,6 +96,12 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
+    if (cameraState === "ready" && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [cameraState]);
+
+  useEffect(() => {
     if (cameraState !== "ready" || screen !== "scanner") {
       return;
     }
