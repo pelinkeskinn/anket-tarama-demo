@@ -71,7 +71,7 @@ export default function Page() {
   const activeAnalyzeRef = useRef<{ id: number; controller: AbortController } | null>(null);
   const analyzeSequenceRef = useRef(0);
   const [screen, setScreen] = useState<Screen>("scanner");
-  const [cameraState, setCameraState] = useState<"idle" | "ready" | "denied" | "unsupported">("idle");
+  const [cameraState, setCameraState] = useState<"idle" | "ready" | "denied" | "unsupported" | "insecure">("idle");
   const [quality, setQuality] = useState<"bad" | "warn" | "ready">("bad");
   const [guidance, setGuidance] = useState("Formu çerçevenin içine alın");
   const [processingText, setProcessingText] = useState("Fotoğraf alındı.\nKağıdı kaldırabilirsiniz.");
@@ -87,7 +87,11 @@ export default function Page() {
 
   useEffect(() => {
     setScannedCount(Number(localStorage.getItem("demoScannedCount") ?? "0"));
-    void requestCamera();
+    if (!window.isSecureContext) {
+      setCameraState("insecure");
+    } else {
+      void requestCamera();
+    }
     return () => stopCamera();
   }, []);
 
@@ -124,6 +128,10 @@ export default function Page() {
   async function requestCamera() {
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraState("unsupported");
+      return;
+    }
+    if (!window.isSecureContext) {
+      setCameraState("insecure");
       return;
     }
     try {
@@ -454,21 +462,33 @@ function Header({ scannedCount, onHistory }: { scannedCount: number; onHistory: 
   );
 }
 
-function CameraFallback({ state, onRequest }: { state: "idle" | "ready" | "denied" | "unsupported"; onRequest: () => void }) {
+function CameraFallback({
+  state,
+  onRequest
+}: {
+  state: "idle" | "ready" | "denied" | "unsupported" | "insecure";
+  onRequest: () => void;
+}) {
   let message = "Kamera hazırlanıyor...";
   if (state === "denied") {
     message = "Form tarayabilmek için kamera izni vermeniz gerekiyor.";
   }
+  if (state === "idle") {
+    message = "Kamerayı başlatmak için butona dokunun.";
+  }
   if (state === "unsupported") {
     message = "Bu tarayıcı kamera ile taramayı desteklemiyor.";
+  }
+  if (state === "insecure") {
+    message = "Kamera için güvenli bağlantı gerekiyor. Telefonu HTTPS tüneli ya da localhost üzerinden açın.";
   }
   return (
     <div className="camera-placeholder">
       <div className="stack">
         <strong>{message}</strong>
-        {state === "denied" && (
+        {(state === "denied" || state === "idle" || state === "insecure") && (
           <button className="primary-button" onClick={onRequest}>
-            Kamera İzni Ver
+            Kamerayı Başlat
           </button>
         )}
       </div>

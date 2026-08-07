@@ -17,7 +17,7 @@ app = FastAPI(title="Kizilay Demo OMR Prototype")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https?://(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?",
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|\d{1,3}(\.\d{1,3}){3}|[A-Za-z0-9-]+\.onrender\.com|[A-Za-z0-9-]+\.vercel\.app)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,6 +27,11 @@ app.add_middleware(
 @app.on_event("startup")
 def startup() -> None:
     init_db()
+
+
+@app.get("/healthz")
+def healthz() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 @app.post("/api/omr/analyze", response_model=AnalyzeResponse)

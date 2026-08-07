@@ -1,4 +1,5 @@
 backend/.venv/
+backend/.venv313/
 backend/.pytest_cache/
 backend/server.log
 backend/server.err.log
@@ -9,6 +10,7 @@ frontend/node_modules/
 frontend/.next/
 frontend/coverage/
 frontend/*.log
+frontend/.certs/
 *.pyc
 __pycache__/
 

@@ -71,6 +71,17 @@ npm run dev -- --hostname 0.0.0.0
 
 Telefon tarayıcısında `http://BILGISAYAR_IP:3000` açılır. Bazı mobil tarayıcılar yerel HTTP adresinde kamera izni vermeyebilir; bu durumda HTTPS tüneli veya yerel sertifika gerekir.
 
+Telefonla en sorunsuz kullanım için HTTPS tüneli önerilir. Tünel açınca kamerayı güvenli bağlamda kullanabilirsiniz; frontend ekranı açıldıktan sonra gerekirse `Kamerayı Başlat` düğmesine dokunun.
+
+Örnek yaklaşım:
+
+```bash
+cd frontend
+npm run dev -- --hostname 0.0.0.0
+```
+
+Sonra Cloudflare Tunnel veya ngrok ile `http://localhost:3000` adresini dışarı açın ve telefonda tünel URL’sini kullanın.
+
 Frontend, `/api` isteklerini backend'e proxy eder. Backend farklı bir portta veya adreste çalışıyorsa `frontend/.env.local` içinde server tarafı proxy hedefini ayarlayın:
 
 ```text
@@ -138,6 +149,18 @@ Frontend:
 cd frontend
 npm test
 ```
+
+## Render ile dağıtım
+
+Bu proje Render’a doğrudan yüklenebilir şekilde hazırlanmıştır. Kök dizindeki [render.yaml](render.yaml) dosyası backend ve frontend servislerini tanımlar.
+
+1. Render hesabı açın ve GitHub reposunu bağlayın.
+2. Yeni bir Render Web Service oluşturup bu repoyu seçin.
+3. Render, [render.yaml](render.yaml) dosyasını otomatik algılayacaktır.
+4. Backend servis adını `anket-tarama-backend` olarak bırakıyorsanız frontend servisinin `SERVER_API_BASE_URL` değeri zaten uygundur; isterseniz servis adını değiştirip frontend ortam değişkenini güncelleyin.
+5. İlk deploy sonrası frontend servisinin URL’sini backend servisinin URL’siyle eşleştirmek için `SERVER_API_BASE_URL` değerini güncelleyin.
+
+> Not: Render’ın geçici dosyası nedeniyle veritabanı demo amaçlı `/tmp/demo.db` üzerinde tutulur; deploy sonrası veriler sıfırlanabilir.
 
 ## Bilinen teknik sınırlamalar
 

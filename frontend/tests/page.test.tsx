@@ -75,7 +75,7 @@ describe("scanner page", () => {
     });
     render(<Page />);
     expect(await screen.findByText("Form tarayabilmek için kamera izni vermeniz gerekiyor.")).toBeInTheDocument();
-    expect(screen.getByText("Kamera İzni Ver")).toBeInTheDocument();
+    expect(screen.getByText("Kamerayı Başlat")).toBeInTheDocument();
   });
 
   test("scan button moves from inactive to active", async () => {

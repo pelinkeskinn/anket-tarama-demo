@@ -1,5 +1,10 @@
 import "@testing-library/jest-dom/vitest";
 
+Object.defineProperty(window, "isSecureContext", {
+  configurable: true,
+  value: true
+});
+
 HTMLCanvasElement.prototype.getContext = function getContext() {
   return {
     drawImage: vi.fn()
