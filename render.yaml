@@ -24,10 +24,12 @@ services:
 
   - type: web
     name: anket-tarama-frontend
-    runtime: static
+    runtime: node
+    region: frankfurt
+    plan: free
     rootDir: frontend
     buildCommand: npm ci && npm run build
-    staticPublishPath: out
+    startCommand: npm run start -- --hostname 0.0.0.0 --port $PORT
     envVars:
       - key: NODE_VERSION
         value: 24.5.0
