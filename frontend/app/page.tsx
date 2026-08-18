@@ -129,6 +129,20 @@ export default function Page() {
     return () => window.clearInterval(timer);
   }, [cameraState, screen]);
 
+  useEffect(() => {
+    if (cameraState !== "ready" || screen !== "scanner" || quality !== "ready" || submittingRef.current) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      const video = videoRef.current;
+      if (video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !submittingRef.current) {
+        window.clearInterval(timer);
+        void captureAndAnalyze();
+      }
+    }, 350);
+    return () => window.clearInterval(timer);
+  }, [cameraState, screen, quality]);
+
   const reviewAnswers = useMemo(
     () => analysis?.answers.filter((answer) => answer.status === "DOUBLE_MARK" || answer.status === "UNCERTAIN") ?? [],
     [analysis]

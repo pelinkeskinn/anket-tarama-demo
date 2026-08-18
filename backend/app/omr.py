@@ -360,7 +360,7 @@ def _select_extreme_marker_quad(candidates: list[tuple[float, float, float]], wi
         return None
     if not _has_consistent_edges(ordered):
         return None
-    if _quadrilateral_bbox_area(ordered) < width * height * 0.18:
+    if _quadrilateral_bbox_area(ordered) < width * height * 0.08:
         return None
     if not _points_are_near_image_corners(ordered, width, height):
         return None
@@ -418,7 +418,7 @@ def _select_corner_marker_quad(candidates: list[tuple[float, float, float]], wid
                     if not _points_are_near_image_corners(ordered, width, height):
                         continue
                     bbox_area = _quadrilateral_bbox_area(ordered)
-                    if bbox_area < image_area * 0.18:
+                    if bbox_area < image_area * 0.08:
                         continue
                     marker_areas = [top_left[2], top_right[2], bottom_right[2], bottom_left[2]]
                     area_ratio = max(marker_areas) / max(min(marker_areas), 1.0)
@@ -433,14 +433,14 @@ def _select_corner_marker_quad(candidates: list[tuple[float, float, float]], wid
 
 def _points_are_near_image_corners(points: np.ndarray, width: int, height: int) -> bool:
     return bool(
-        points[0][0] <= width * 0.34
-        and points[0][1] <= height * 0.22
-        and points[1][0] >= width * 0.66
-        and points[1][1] <= height * 0.22
-        and points[2][0] >= width * 0.66
-        and points[2][1] >= height * 0.78
-        and points[3][0] <= width * 0.34
-        and points[3][1] >= height * 0.78
+        points[0][0] <= width * 0.45
+        and points[0][1] <= height * 0.20
+        and points[1][0] >= width * 0.55
+        and points[1][1] <= height * 0.20
+        and points[2][0] >= width * 0.55
+        and points[2][1] >= height * 0.80
+        and points[3][0] <= width * 0.45
+        and points[3][1] >= height * 0.80
     )
 
 
