@@ -19,7 +19,7 @@ def load_template() -> dict[str, Any]:
 
 @lru_cache
 def load_templates() -> list[dict[str, Any]]:
-    return [_omr_survey_v2_template(), load_template(), _kizilay_survey_v1_template()]
+    return [_healthy_nutrition_v2_template(), _omr_survey_v2_template(), load_template(), _kizilay_survey_v1_template()]
 
 
 def _option_box(center_x: int, center_y: int, size: int = 112) -> dict[str, int]:
@@ -37,6 +37,34 @@ def _v2_option_box(center_x: int, center_y: int, size: int = 130) -> dict[str, i
         "y": center_y - size // 2,
         "width": size,
         "height": size,
+    }
+
+
+def _healthy_nutrition_v2_template() -> dict[str, Any]:
+    """Template for Saglikli_Beslenme_Anketi_Formu (2), August 2026."""
+    option_centers = (1934, 2062, 2191, 2320)
+    first_section_y = (672, 782, 872, 962, 1052, 1142, 1232, 1322, 1414, 1506, 1596)
+    second_section_y = (1902, 2005, 2102, 2192, 2282, 2372, 2462, 2552, 2642, 2732, 2822, 2912, 3002, 3092, 3182)
+    option_names = ("NEVER", "SOMETIMES", "OFTEN", "ALWAYS")
+    questions = []
+    for question_no, center_y in enumerate((*first_section_y, *second_section_y), start=1):
+        questions.append(
+            {
+                "questionNo": question_no,
+                "options": {
+                    option: _option_box(center_x, center_y, size=64)
+                    for option, center_x in zip(option_names, option_centers)
+                },
+            }
+        )
+    return {
+        "templateCode": "HEALTHY_NUTRITION_V2",
+        "pageWidth": 2480,
+        "pageHeight": 3508,
+        "markerMargin": 82,
+        "markerSize": 42,
+        "questionCount": 26,
+        "questions": questions,
     }
 
 

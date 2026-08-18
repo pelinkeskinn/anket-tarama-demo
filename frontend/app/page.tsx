@@ -2,12 +2,12 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
-const API_BASE = "";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "";
 const MAX_MANUAL_REVIEW_QUESTIONS = 4;
 const MAX_CAPTURE_SIDE = 2200;
 const CAMERA_JPEG_QUALITY = 0.86;
 
-type AnswerValue = "NEVER" | "SOMETIMES" | "ALWAYS" | "BLANK";
+type AnswerValue = "NEVER" | "SOMETIMES" | "OFTEN" | "ALWAYS" | "BLANK";
 type AnswerStatus = "OK" | "BLANK" | "DOUBLE_MARK" | "UNCERTAIN";
 type AnswerSource = "AUTO" | "MANUAL" | "UNRESOLVED";
 type Screen = "scanner" | "processing" | "manual" | "blankConfirm" | "success" | "duplicate" | "fatal" | "history" | "detail";
@@ -48,6 +48,7 @@ type StoredDetail = StoredSummary & {
 const labels: Record<AnswerValue | AnswerStatus, string> = {
   NEVER: "Hiçbir zaman",
   SOMETIMES: "Bazen",
+  OFTEN: "Sık sık",
   ALWAYS: "Her zaman",
   BLANK: "Boş",
   OK: "Okundu",
@@ -315,7 +316,7 @@ export default function Page() {
           status: value === "BLANK" ? "BLANK" : "OK",
           source: "MANUAL",
           confidence: 1,
-          manualCorrection: labels[value]
+          manualCorrection: answerOptionLabel(analysis.templateCode, answer.questionNo, value)
         };
       })
     };
@@ -338,7 +339,7 @@ export default function Page() {
   }
 
   async function saveAndShowSuccess(payload: Analysis) {
-    const response = await fetch(`${API_BASE}/api/demo/forms`, {
+    const response = await fetch(`${API_BASE}/api/forms`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -390,13 +391,13 @@ export default function Page() {
   }
 
   async function loadHistory() {
-    const response = await fetch(`${API_BASE}/api/demo/forms`);
+    const response = await fetch(`${API_BASE}/api/forms`);
     setHistory(response.ok ? ((await response.json()) as StoredSummary[]) : []);
     setScreen("history");
   }
 
   async function openDetail(id: number) {
-    const response = await fetch(`${API_BASE}/api/demo/forms/${id}`);
+    const response = await fetch(`${API_BASE}/api/forms/${id}`);
     if (response.ok) {
       setDetail((await response.json()) as StoredDetail);
       setScreen("detail");
@@ -404,13 +405,17 @@ export default function Page() {
   }
 
   async function deleteDetail(id: number) {
-    await fetch(`${API_BASE}/api/demo/forms/${id}`, { method: "DELETE" });
+    await fetch(`${API_BASE}/api/forms/${id}`, { method: "DELETE" });
     setDetail(null);
     await loadHistory();
   }
 
+  function exportExcel() {
+    window.location.href = `${API_BASE}/api/forms/export.xlsx`;
+  }
+
   if (screen === "history") {
-    return <HistoryScreen scannedCount={scannedCount} forms={history} onBack={() => setScreen("scanner")} onOpen={openDetail} />;
+    return <HistoryScreen scannedCount={scannedCount} forms={history} onBack={() => setScreen("scanner")} onOpen={openDetail} onExport={exportExcel} />;
   }
 
   if (screen === "detail" && detail) {
@@ -469,7 +474,7 @@ export default function Page() {
       {screen === "processing" && <StatusScreen title={processingText} button={processingText.includes("uzun") ? "Tekrar Dene" : undefined} onClick={cancelAnalyzeAndReturnToScanner} />}
 
       {screen === "manual" && analysis && (
-        <ManualReview answers={reviewAnswers} selections={manualSelections} onSelect={chooseManual} onContinue={continueManual} />
+        <ManualReview templateCode={analysis.templateCode} answers={reviewAnswers} selections={manualSelections} onSelect={chooseManual} onContinue={continueManual} />
       )}
 
       {screen === "blankConfirm" && finalAnalysis && (
@@ -559,11 +564,13 @@ function StatusScreen({ title, button, onClick }: { title: string; button?: stri
 }
 
 function ManualReview({
+  templateCode,
   answers,
   selections,
   onSelect,
   onContinue
 }: {
+  templateCode: string;
   answers: Answer[];
   selections: Record<number, AnswerValue>;
   onSelect: (questionNo: number, value: AnswerValue) => void;
@@ -578,13 +585,13 @@ function ManualReview({
           <strong>Soru {answer.questionNo}</strong>
           <span className="muted">{labels[answer.status]}</span>
           <div className="review-options">
-            {(["NEVER", "SOMETIMES", "ALWAYS", "BLANK"] as const).map((value) => (
+            {(["NEVER", "SOMETIMES", "OFTEN", "ALWAYS", "BLANK"] as const).map((value) => (
               <button
                 key={value}
                 className={`option-button ${selections[answer.questionNo] === value ? "selected" : ""}`}
                 onClick={() => onSelect(answer.questionNo, value)}
               >
-                {value === "BLANK" ? "Boş bırak" : labels[value]}
+                {value === "BLANK" ? "Boş bırak" : answerOptionLabel(templateCode, answer.questionNo, value)}
               </button>
             ))}
           </div>
@@ -648,7 +655,7 @@ function SuccessScreen({ analysis, onNext }: { analysis: Analysis; onNext: () =>
         <div>Manuel düzeltilen soru sayısı: {manualCount}</div>
         <div>Boş cevap sayısı: {blankCount}</div>
       </div>
-      <AnswerList answers={analysis.answers} />
+      <AnswerList templateCode={analysis.templateCode} answers={analysis.answers} />
       <button className="scan-button" onClick={onNext}>
         SONRAKİ FORMA GEÇ
       </button>
@@ -656,22 +663,29 @@ function SuccessScreen({ analysis, onNext }: { analysis: Analysis; onNext: () =>
   );
 }
 
-function HistoryScreen({ scannedCount, forms, onBack, onOpen }: { scannedCount: number; forms: StoredSummary[]; onBack: () => void; onOpen: (id: number) => void }) {
+function HistoryScreen({ scannedCount, forms, onBack, onOpen, onExport }: { scannedCount: number; forms: StoredSummary[]; onBack: () => void; onOpen: (id: number) => void; onExport: () => void }) {
   return (
     <main className="app">
       <Header scannedCount={scannedCount} onHistory={onBack} />
       <section className="screen">
         <div className="status-title">Geçmiş Taramalar</div>
+        <button className="primary-button" onClick={onExport} disabled={forms.length === 0}>
+          EXCEL'E AKTAR
+        </button>
         {forms.length === 0 && <div className="panel">Kayıt bulunamadı.</div>}
-        {forms.map((form) => (
-          <button className="history-row" key={form.id} onClick={() => onOpen(form.id)}>
-            <strong>#{form.id}</strong>
-            <span>{new Date(form.createdAt).toLocaleString("tr-TR")}</span>
-            <span>%{Math.round(form.formConfidence * 100)}</span>
-            <span>Boş: {form.blankCount}</span>
-            <span>Manuel: {form.manualCount}</span>
-          </button>
-        ))}
+        {forms.length > 0 && (
+          <div className="history-table-wrap">
+            <table className="history-table">
+              <thead><tr><th>Kayıt</th><th>Tarih</th><th>Güven</th><th>Boş</th><th>Manuel</th></tr></thead>
+              <tbody>{forms.map((form) => (
+                <tr key={form.id} onClick={() => onOpen(form.id)} tabIndex={0}>
+                  <td>#{form.id}</td><td>{new Date(form.createdAt).toLocaleString("tr-TR")}</td>
+                  <td>%{Math.round(form.formConfidence * 100)}</td><td>{form.blankCount}</td><td>{form.manualCount}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
         <button className="secondary-button" onClick={onBack}>
           GERİ
         </button>
@@ -692,7 +706,7 @@ function DetailScreen({ scannedCount, detail, onBack, onDelete }: { scannedCount
           <span>Boş cevap: {detail.blankCount}</span>
           <span>Manuel düzeltme: {detail.manualCount}</span>
         </div>
-        <AnswerList answers={detail.answers} showConfidence />
+        <AnswerList templateCode={detail.templateCode} answers={detail.answers} showConfidence />
         <button className="danger-button" onClick={() => onDelete(detail.id)}>
           KAYDI SİL
         </button>
@@ -704,13 +718,13 @@ function DetailScreen({ scannedCount, detail, onBack, onDelete }: { scannedCount
   );
 }
 
-function AnswerList({ answers, showConfidence = false }: { answers: Answer[]; showConfidence?: boolean }) {
+function AnswerList({ templateCode, answers, showConfidence = false }: { templateCode: string; answers: Answer[]; showConfidence?: boolean }) {
   return (
     <div className="answer-list">
       {answers.map((answer) => (
         <div className="answer-row" key={answer.questionNo}>
           <strong>{answer.questionNo}.</strong>
-          <span>{answer.value ? labels[answer.value] : labels[answer.status]}</span>
+          <span>{answer.value ? answerOptionLabel(templateCode, answer.questionNo, answer.value) : labels[answer.status]}</span>
           <span className="badge">{answer.source === "MANUAL" ? "Manuel seçildi" : answer.source}</span>
           {showConfidence && <span className="muted">Güven: %{Math.round(answer.confidence * 100)}</span>}
           {answer.manualCorrection && <span className="muted">Düzeltme: {answer.manualCorrection}</span>}
@@ -749,6 +763,15 @@ function rememberSequence(payload: Analysis) {
   const current = sequence(payload);
   const previous = JSON.parse(localStorage.getItem("demoAnswerSequences") ?? "[]") as string[];
   localStorage.setItem("demoAnswerSequences", JSON.stringify([current, ...previous].slice(0, 20)));
+}
+
+function answerOptionLabel(templateCode: string, questionNo: number, value: AnswerValue): string {
+  if (value === "BLANK") return labels.BLANK;
+  if (templateCode === "HEALTHY_NUTRITION_V2" && questionNo >= 12) {
+    return ({ NEVER: "Hiçbir zaman", SOMETIMES: "1-2 kez/hafta", OFTEN: "3-4 kez/hafta", ALWAYS: "5+ kez/hafta" } as const)[value];
+  }
+  if (templateCode !== "HEALTHY_NUTRITION_V2") return labels[value];
+  return ({ NEVER: "Hiçbir zaman", SOMETIMES: "Ara sıra", OFTEN: "Sık sık", ALWAYS: "Her zaman" } as const)[value];
 }
 
 function fullCameraFrame(video: HTMLVideoElement) {

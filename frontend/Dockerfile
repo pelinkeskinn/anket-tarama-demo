@@ -7,6 +7,6 @@ RUN npm install
 
 COPY frontend ./
 
-ENV SERVER_API_BASE_URL=http://backend:8000
+ENV NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 CMD ["npm", "run", "dev", "--", "--hostname", "0.0.0.0"]
 

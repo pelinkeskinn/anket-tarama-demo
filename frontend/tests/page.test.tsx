@@ -32,7 +32,7 @@ function mockFetchAnalysis(payload: unknown) {
     if (url.includes("/api/omr/analyze")) {
       return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
     }
-    if (url.includes("/api/demo/forms")) {
+    if (url.includes("/api/forms")) {
       return new Response(JSON.stringify({ id: 1, createdAt: new Date().toISOString(), ...payload }), {
         status: 200,
         headers: { "Content-Type": "application/json" }
@@ -215,6 +215,6 @@ describe("scanner page", () => {
     render(<Page />);
     fireEvent.click(screen.getByText("Demo Görseller"));
     fireEvent.click(screen.getByText("Demo Görselini Tara"));
-    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining("/api/demo/sample-forms/filled-clean.png")));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining("/api/demo/sample-forms/filled-clean-v2.png")));
   });
 });

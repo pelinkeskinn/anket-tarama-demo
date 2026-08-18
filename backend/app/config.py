@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -16,4 +18,45 @@ EMPTY_THRESHOLD = float(os.getenv("OMR_EMPTY_THRESHOLD", "0.23"))
 MARK_THRESHOLD = float(os.getenv("OMR_MARK_THRESHOLD", "0.25"))
 UNCERTAIN_MARGIN = float(os.getenv("OMR_UNCERTAIN_MARGIN", "0.07"))
 DOUBLE_MARK_THRESHOLD = float(os.getenv("OMR_DOUBLE_MARK_THRESHOLD", "0.34"))
+
+
+def _default_database_url() -> str:
+    return f"sqlite:///{DATABASE_PATH.as_posix()}"
+
+
+def _csv_env(name: str, default: str) -> tuple[str, ...]:
+    return tuple(value.strip() for value in os.getenv(name, default).split(",") if value.strip())
+
+
+def _database_url() -> str:
+    url = os.getenv("DATABASE_URL", _default_database_url())
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
+
+
+@dataclass(frozen=True)
+class Settings:
+    app_name: str
+    environment: str
+    database_url: str
+    cors_origins: tuple[str, ...]
+    cors_origin_regex: str | None
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings(
+        app_name=os.getenv("APP_NAME", "Anket Tarama API"),
+        environment=os.getenv("APP_ENV", "development"),
+        database_url=_database_url(),
+        cors_origins=_csv_env("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"),
+        cors_origin_regex=os.getenv(
+            "CORS_ORIGIN_REGEX",
+            r"https?://([A-Za-z0-9-]+\.onrender\.com|[A-Za-z0-9-]+\.vercel\.app)(:\d+)?$",
+        )
+        or None,
+    )
 

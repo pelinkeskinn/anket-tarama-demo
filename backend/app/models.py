@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
-AnswerValue = Literal["NEVER", "SOMETIMES", "ALWAYS", "BLANK"]
+AnswerValue = Literal["NEVER", "SOMETIMES", "OFTEN", "ALWAYS", "BLANK"]
 AnswerStatus = Literal["OK", "BLANK", "DOUBLE_MARK", "UNCERTAIN"]
 AnswerSource = Literal["AUTO", "MANUAL", "UNRESOLVED"]
 
@@ -38,10 +38,18 @@ class AnalyzeResponse(BaseModel):
 
 
 class StoredFormCreate(BaseModel):
-    analysisId: str
-    templateCode: str
+    analysisId: str = Field(min_length=1, max_length=64)
+    templateCode: str = Field(min_length=1, max_length=64)
     formConfidence: float = Field(ge=0, le=1)
-    answers: list[AnswerResult]
+    answers: list[AnswerResult] = Field(min_length=25, max_length=26)
+
+    @model_validator(mode="after")
+    def validate_question_set(self) -> "StoredFormCreate":
+        question_numbers = [answer.questionNo for answer in self.answers]
+        expected_numbers = list(range(1, len(self.answers) + 1))
+        if len(self.answers) not in {25, 26} or sorted(question_numbers) != expected_numbers:
+            raise ValueError("answers must contain each question number from 1 to 25 or 1 to 26 exactly once")
+        return self
 
 
 class StoredFormSummary(BaseModel):

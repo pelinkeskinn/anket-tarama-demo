@@ -397,6 +397,39 @@ button:disabled {
   }
 }
 
+.history-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+.history-table th,
+.history-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.history-table th {
+  background: #f4f6f7;
+  font-size: 13px;
+}
+
+.history-table tbody tr {
+  cursor: pointer;
+}
+
+.history-table tbody tr:hover {
+  background: #fff4f5;
+}
+
 @media (max-width: 420px) {
   .upload-card {
     grid-template-columns: 1fr;

@@ -1,29 +1,35 @@
 services:
   - type: web
     name: anket-tarama-backend
-    env: python
+    runtime: python
     region: frankfurt
     plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
       - key: PYTHONPATH
         value: .
-      - key: DATABASE_PATH
-        value: /tmp/demo.db
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
       - key: MAX_MANUAL_REVIEW_QUESTIONS
         value: 4
 
   - type: web
     name: anket-tarama-frontend
-    env: node
-    region: frankfurt
-    plan: free
+    runtime: static
     rootDir: frontend
-    buildCommand: npm install && npm run build
-    startCommand: npm run start -- --hostname 0.0.0.0 --port $PORT
+    buildCommand: npm ci && npm run build
+    staticPublishPath: out
     envVars:
-      - key: SERVER_API_BASE_URL
-        value: https://anket-tarama-backend.onrender.com
+      - key: NODE_VERSION
+        value: 24.5.0
+      - key: NEXT_PUBLIC_API_BASE_URL
+        sync: false

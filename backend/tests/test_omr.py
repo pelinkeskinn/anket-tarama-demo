@@ -255,3 +255,12 @@ def test_form_confidence_is_generated() -> None:
     response = analyze_image_bytes(image_bytes("filled-clean.png"))
     assert 0 < response.formConfidence <= 1
 
+
+def test_healthy_nutrition_v2_template_has_26_four_option_questions() -> None:
+    from app.template import load_templates
+
+    template = next(item for item in load_templates() if item["templateCode"] == "HEALTHY_NUTRITION_V2")
+    assert template["questionCount"] == 26
+    assert [question["questionNo"] for question in template["questions"]] == list(range(1, 27))
+    assert all(list(question["options"]) == ["NEVER", "SOMETIMES", "OFTEN", "ALWAYS"] for question in template["questions"])
+

@@ -55,7 +55,7 @@ npm run dev
 Gerekirse `frontend/.env.local` içine şunu ekleyin:
 
 ```text
-SERVER_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ```
 
 ## Kamera ve telefon testi
@@ -82,10 +82,10 @@ npm run dev -- --hostname 0.0.0.0
 
 Sonra Cloudflare Tunnel veya ngrok ile `http://localhost:3000` adresini dışarı açın ve telefonda tünel URL’sini kullanın.
 
-Frontend, `/api` isteklerini backend'e proxy eder. Backend farklı bir portta veya adreste çalışıyorsa `frontend/.env.local` içinde server tarafı proxy hedefini ayarlayın:
+Frontend API'ye doğrudan bağlanır. Backend farklı bir portta veya adreste çalışıyorsa `frontend/.env.local` içinde genel API adresini ayarlayın:
 
 ```text
-SERVER_API_BASE_URL=http://BILGISAYAR_IP:8000
+NEXT_PUBLIC_API_BASE_URL=http://BILGISAYAR_IP:8000
 ```
 
 ## Örnek form
@@ -128,10 +128,11 @@ Eşikler `backend/app/config.py` içinde ortam değişkenlerinden okunur:
 ## API
 
 - `POST /api/omr/analyze`: Fotoğrafı analiz eder, fotoğrafı saklamaz.
-- `POST /api/demo/forms`: Nihai cevapları SQLite'a kaydeder.
-- `GET /api/demo/forms`: Kayıt özetlerini listeler.
-- `GET /api/demo/forms/{formId}`: 25 cevaplı kayıt detayını döndürür.
-- `DELETE /api/demo/forms/{formId}`: Demo kaydını siler.
+- `POST /api/forms`: Nihai cevapları kaydeder.
+- `GET /api/forms`: Kayıt özetlerini listeler.
+- `GET /api/forms/{formId}`: 25 cevaplı kayıt detayını döndürür.
+- `DELETE /api/forms/{formId}`: Kaydı siler.
+- `GET /readyz`: Veritabanı bağlantısıyla birlikte servis hazırlığını denetler.
 
 ## Testler
 
@@ -157,10 +158,12 @@ Bu proje Render’a doğrudan yüklenebilir şekilde hazırlanmıştır. Kök di
 1. Render hesabı açın ve GitHub reposunu bağlayın.
 2. Yeni bir Render Web Service oluşturup bu repoyu seçin.
 3. Render, [render.yaml](render.yaml) dosyasını otomatik algılayacaktır.
-4. Backend servis adını `anket-tarama-backend` olarak bırakıyorsanız frontend servisinin `SERVER_API_BASE_URL` değeri zaten uygundur; isterseniz servis adını değiştirip frontend ortam değişkenini güncelleyin.
-5. İlk deploy sonrası frontend servisinin URL’sini backend servisinin URL’siyle eşleştirmek için `SERVER_API_BASE_URL` değerini güncelleyin.
+4. Supabase veya Neon üzerinde ücretsiz bir PostgreSQL veritabanı oluşturun.
+5. Backend servisinde `DATABASE_URL` değerini PostgreSQL bağlantı adresi olarak tanımlayın.
+6. Backend servisinde `CORS_ORIGINS` değerini frontend Render adresi olarak tanımlayın.
+7. Frontend servisinde `NEXT_PUBLIC_API_BASE_URL` değerini backend Render adresi olarak tanımlayın.
 
-> Not: Render’ın geçici dosyası nedeniyle veritabanı demo amaçlı `/tmp/demo.db` üzerinde tutulur; deploy sonrası veriler sıfırlanabilir.
+Render üzerindeki backend dosya sistemi kalıcı veri için kullanılmaz. Yerel geliştirmede SQLite, dağıtımda harici PostgreSQL kullanılır. Alembic migration'ları backend başlarken uygulanır.
 
 ## Bilinen teknik sınırlamalar
 
@@ -168,4 +171,4 @@ Bu proje Render’a doğrudan yüklenebilir şekilde hazırlanmıştır. Kök di
 - Mobil kalite kontrolü ilk prototip seviyesindedir; gerçek marker algılama backend tarafında yapılır.
 - Kesin mükerrer tespit iddiası yoktur; aynı oturumda cevap dizisi benzerliğiyle uyarı gösterilir.
 - Fotoğraf arşivi, kullanıcı hesabı, admin paneli, okul entegrasyonu ve raporlama kapsam dışıdır.
-- SQLite demo kalıcılığı tek cihaz geliştirme akışı içindir; üretim veritabanı değildir.
+- Kimlik doğrulama ve yönetici/operatör rol ayrımı henüz eklenmemiştir; gerçek kullanıcı verisiyle yayına alınmadan önce tamamlanmalıdır.

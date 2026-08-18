@@ -22,7 +22,7 @@ from app.models import AnalyzeResponse, AnswerResult, ProcessingStats
 from app.template import load_templates
 
 
-OPTION_ORDER = ("NEVER", "SOMETIMES", "ALWAYS")
+OPTION_ORDER = ("NEVER", "SOMETIMES", "OFTEN", "ALWAYS")
 MAX_ACCEPTED_BLANK_ANSWERS = 8
 LOW_CONTRAST_MARK_THRESHOLD = 0.12
 ANALYSIS_SCALE = 0.8
