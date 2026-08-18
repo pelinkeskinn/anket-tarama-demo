@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "";
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://anket-tarama-backend.onrender.com").replace(/\/$/, "");
 const MAX_MANUAL_REVIEW_QUESTIONS = 4;
 const MAX_CAPTURE_SIDE = 2200;
 const CAMERA_JPEG_QUALITY = 0.86;

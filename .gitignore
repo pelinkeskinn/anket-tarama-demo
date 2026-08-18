@@ -13,6 +13,7 @@ frontend_runtime.*.log
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+frontend/.env.local
 frontend/coverage/
 frontend/*.log
 frontend/.certs/
