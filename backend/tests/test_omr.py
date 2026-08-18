@@ -5,13 +5,14 @@ from io import BytesIO
 from pathlib import Path
 
 import cv2
+import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
 from app.config import SAMPLE_FORMS_DIR
 from app.database import temporary_image_files
 from app.errors import OmrError
-from app.omr import analyze_image_bytes
+from app.omr import _find_warp_source, analyze_image_bytes
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -263,4 +264,21 @@ def test_healthy_nutrition_v2_template_has_26_four_option_questions() -> None:
     assert template["questionCount"] == 26
     assert [question["questionNo"] for question in template["questions"]] == list(range(1, 27))
     assert all(list(question["options"]) == ["NEVER", "SOMETIMES", "OFTEN", "ALWAYS"] for question in template["questions"])
+
+
+def test_nutrition_form_is_found_in_landscape_camera_frame() -> None:
+    form = cv2.imread(str(SAMPLE_FORMS_DIR / "healthy-nutrition-v1.png"))
+    target_height = 760
+    target_width = round(form.shape[1] * target_height / form.shape[0])
+    resized = cv2.resize(form, (target_width, target_height), interpolation=cv2.INTER_AREA)
+    camera_frame = np.full((1080, 1920, 3), 35, dtype=np.uint8)
+    x = (camera_frame.shape[1] - target_width) // 2
+    y = (camera_frame.shape[0] - target_height) // 2
+    camera_frame[y : y + target_height, x : x + target_width] = resized
+
+    source, _ = _find_warp_source(
+        camera_frame,
+        {"pageWidth": 2480, "pageHeight": 3508},
+    )
+    assert source.shape == (4, 2)
 

@@ -6,6 +6,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "";
 const MAX_MANUAL_REVIEW_QUESTIONS = 4;
 const MAX_CAPTURE_SIDE = 2200;
 const CAMERA_JPEG_QUALITY = 0.86;
+const CAMERA_CHECK_INTERVAL_MS = 300;
+const REQUIRED_STABLE_FRAMES = 3;
 
 type AnswerValue = "NEVER" | "SOMETIMES" | "OFTEN" | "ALWAYS" | "BLANK";
 type AnswerStatus = "OK" | "BLANK" | "DOUBLE_MARK" | "UNCERTAIN";
@@ -73,6 +75,9 @@ export default function Page() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const submittingRef = useRef(false);
+  const autoCaptureRef = useRef(false);
+  const previousFrameRef = useRef<Uint8ClampedArray | null>(null);
+  const stableFramesRef = useRef(0);
   const activeAnalyzeRef = useRef<{ id: number; controller: AbortController } | null>(null);
   const analyzeSequenceRef = useRef(0);
   const [screen, setScreen] = useState<Screen>("scanner");
@@ -113,35 +118,54 @@ export default function Page() {
     if (cameraState !== "ready" || screen !== "scanner") {
       return;
     }
-    let step = 0;
-    const messages = [
-      ["bad", "Formu çerçevenin içine alın"],
-      ["warn", "Telefonu sabit tutun"],
-      ["warn", "Dört referans işareti görünmüyor"],
-      ["ready", "Taratmaya hazır"]
-    ] as const;
-    const timer = window.setInterval(() => {
-      const [nextQuality, nextMessage] = messages[Math.min(step, messages.length - 1)];
-      setQuality(nextQuality);
-      setGuidance(nextMessage);
-      step += 1;
-    }, 900);
-    return () => window.clearInterval(timer);
-  }, [cameraState, screen]);
-
-  useEffect(() => {
-    if (cameraState !== "ready" || screen !== "scanner" || quality !== "ready" || submittingRef.current) {
-      return;
-    }
+    autoCaptureRef.current = false;
+    previousFrameRef.current = null;
+    stableFramesRef.current = 0;
     const timer = window.setInterval(() => {
       const video = videoRef.current;
-      if (video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !submittingRef.current) {
-        window.clearInterval(timer);
-        void captureAndAnalyze();
+      if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || submittingRef.current || autoCaptureRef.current) {
+        return;
       }
-    }, 350);
+      const check = inspectCameraFrame(video, previousFrameRef.current);
+      previousFrameRef.current = check.frame;
+      if (check.brightness < 55) {
+        stableFramesRef.current = 0;
+        setQuality("bad");
+        setGuidance("Ortam çok karanlık — ışığı artırın");
+        return;
+      }
+      if (check.paperRatio < 0.12) {
+        stableFramesRef.current = 0;
+        setQuality("bad");
+        setGuidance("Formun tamamını çerçevenin içine alın");
+        return;
+      }
+      if (check.sharpness < 7) {
+        stableFramesRef.current = 0;
+        setQuality("warn");
+        setGuidance("Görüntü net değil — kamerayı sabit tutun");
+        return;
+      }
+      if (check.motion > 8) {
+        stableFramesRef.current = 0;
+        setQuality("warn");
+        setGuidance("Telefonu sabit tutun");
+        return;
+      }
+      stableFramesRef.current += 1;
+      if (stableFramesRef.current < REQUIRED_STABLE_FRAMES) {
+        setQuality("warn");
+        setGuidance("Form bulundu — sabit tutun");
+        return;
+      }
+      setQuality("ready");
+      setGuidance("Form algılandı — otomatik taranıyor");
+      autoCaptureRef.current = true;
+      window.clearInterval(timer);
+      void captureAndAnalyze(true);
+    }, CAMERA_CHECK_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [cameraState, screen, quality]);
+  }, [cameraState, screen]);
 
   const reviewAnswers = useMemo(
     () => analysis?.answers.filter((answer) => answer.status === "DOUBLE_MARK" || answer.status === "UNCERTAIN") ?? [],
@@ -199,8 +223,8 @@ export default function Page() {
     streamRef.current = null;
   }
 
-  async function captureAndAnalyze() {
-    if (!videoRef.current || submittingRef.current || quality !== "ready") {
+  async function captureAndAnalyze(automatic = false) {
+    if (!videoRef.current || submittingRef.current) {
       return;
     }
     const video = videoRef.current;
@@ -216,6 +240,8 @@ export default function Page() {
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", CAMERA_JPEG_QUALITY));
     if (blob) {
       await analyzeBlob(blob);
+    } else if (automatic) {
+      autoCaptureRef.current = false;
     }
   }
 
@@ -457,7 +483,7 @@ export default function Page() {
           </div>
 
           <div className="actions">
-            <button className="scan-button" onClick={captureAndAnalyze} disabled={cameraState !== "ready" || quality !== "ready" || submittingRef.current}>
+            <button className="scan-button" onClick={() => void captureAndAnalyze()} disabled={cameraState !== "ready" || submittingRef.current}>
               TARAT
             </button>
             <label className="upload-card">
@@ -792,6 +818,54 @@ function fullCameraFrame(video: HTMLVideoElement) {
   const videoWidth = video.videoWidth || 1920;
   const videoHeight = video.videoHeight || 1080;
   return { x: 0, y: 0, width: videoWidth, height: videoHeight };
+}
+
+function inspectCameraFrame(video: HTMLVideoElement, previous: Uint8ClampedArray | null) {
+  const width = 160;
+  const height = 120;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    return { brightness: 0, paperRatio: 0, sharpness: 0, motion: 100, frame: new Uint8ClampedArray() };
+  }
+  context.drawImage(video, 0, 0, width, height);
+  const rgba = context.getImageData(0, 0, width, height).data;
+  const frame = new Uint8ClampedArray(width * height);
+  let brightnessTotal = 0;
+  let paperPixels = 0;
+  let edgeTotal = 0;
+  let edgeSamples = 0;
+  let motionTotal = 0;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      const rgbaIndex = index * 4;
+      const gray = Math.round(rgba[rgbaIndex] * 0.299 + rgba[rgbaIndex + 1] * 0.587 + rgba[rgbaIndex + 2] * 0.114);
+      frame[index] = gray;
+      brightnessTotal += gray;
+      if (gray >= 175) paperPixels += 1;
+      if (x > 0) {
+        edgeTotal += Math.abs(gray - frame[index - 1]);
+        edgeSamples += 1;
+      }
+      if (y > 0) {
+        edgeTotal += Math.abs(gray - frame[index - width]);
+        edgeSamples += 1;
+      }
+      if (previous?.length === frame.length) motionTotal += Math.abs(gray - previous[index]);
+    }
+  }
+
+  return {
+    brightness: brightnessTotal / frame.length,
+    paperRatio: paperPixels / frame.length,
+    sharpness: edgeTotal / Math.max(edgeSamples, 1),
+    motion: previous?.length === frame.length ? motionTotal / frame.length : 100,
+    frame
+  };
 }
 
 function sequence(payload: Analysis): string {

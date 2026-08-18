@@ -186,7 +186,10 @@ def _find_warp_source(image: np.ndarray, template: dict[str, Any]) -> tuple[np.n
     try:
         return _find_marker_centers(image, page_width / page_height), False
     except OmrError:
-        return _find_page_corners(image, page_width / page_height), True
+        try:
+            return _find_page_corners(image, page_width / page_height), True
+        except OmrError:
+            return _find_marker_centers(image, page_width / page_height, allow_small=True), False
 
 
 def _find_aruco_marker_centers(image: np.ndarray, template: dict[str, Any]) -> np.ndarray | None:
@@ -254,11 +257,13 @@ def _scaled_template(template: dict[str, Any], scale: float) -> dict[str, Any]:
     }
 
 
-def _find_marker_centers(image: np.ndarray, target_aspect: float) -> np.ndarray:
+def _find_marker_centers(image: np.ndarray, target_aspect: float, allow_small: bool = False) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     height, width = gray.shape
-    min_area = max(120, width * height * 0.000025)
+    # Small markers are a last-resort pass because text dots and answer circles
+    # become plausible candidates at this scale.
+    min_area = max(20, width * height * 0.000004) if allow_small else max(120, width * height * 0.000025)
 
     all_candidates: list[tuple[float, float, float]] = []
     for thresholded in _marker_thresholds(blurred):
@@ -482,7 +487,7 @@ def _find_page_corners(image: np.ndarray, target_aspect: float) -> np.ndarray:
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    thresholded = cv2.adaptiveThreshold(
+    adaptive = cv2.adaptiveThreshold(
         blurred,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -490,18 +495,25 @@ def _find_page_corners(image: np.ndarray, target_aspect: float) -> np.ndarray:
         51,
         7,
     )
-    contours, _ = cv2.findContours(thresholded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    _, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     image_area = width * height
-    for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:10]:
-        area = float(cv2.contourArea(contour))
-        if area < image_area * 0.2:
-            continue
-        perimeter = cv2.arcLength(contour, True)
-        polygon = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
-        if len(polygon) != 4:
-            continue
-        corners = polygon.reshape(4, 2).astype(np.float32)
-        return _order_points(corners)
+    candidates: list[tuple[float, np.ndarray]] = []
+    for thresholded in (otsu, adaptive):
+        contours, _ = cv2.findContours(thresholded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:12]:
+            area = float(cv2.contourArea(contour))
+            if not image_area * 0.08 <= area <= image_area * 0.98:
+                continue
+            perimeter = cv2.arcLength(contour, True)
+            polygon = cv2.approxPolyDP(contour, 0.025 * perimeter, True)
+            if len(polygon) != 4 or not cv2.isContourConvex(polygon):
+                continue
+            ordered = _order_points(polygon.reshape(4, 2).astype(np.float32))
+            aspect_error = abs(_quadrilateral_aspect(ordered) - target_aspect) / target_aspect
+            if aspect_error <= 0.35 and _has_consistent_edges(ordered):
+                candidates.append((area * (1.0 - aspect_error), ordered))
+    if candidates:
+        return max(candidates, key=lambda item: item[0])[1]
 
     raise OmrError("MARKERS_NOT_FOUND")
 
