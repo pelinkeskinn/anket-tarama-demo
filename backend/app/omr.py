@@ -42,12 +42,17 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
     image = _decode_image(image_bytes)
     _validate_quality(image)
 
+    is_pdf = image_bytes.startswith(b"%PDF")
     candidates: list[tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int]] = []
     saw_invalid_template = False
     templates = load_templates()
-    if image_bytes.startswith(b"%PDF"):
+    if is_pdf:
         templates = [template for template in templates if is_healthy_template(template)]
-    for oriented_image in _orientation_candidates(image):
+    # PDF pages are rasterized by their page coordinate system and are already
+    # upright. Trying four rotations multiplies Render CPU time and can push a
+    # valid request beyond the reverse proxy timeout.
+    oriented_images = [image] if is_pdf else _orientation_candidates(image)
+    for oriented_image in oriented_images:
         warp_sources: dict[float, tuple[np.ndarray, bool]] = {}
         for template in templates:
             try:

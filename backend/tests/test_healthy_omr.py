@@ -7,6 +7,7 @@ import numpy as np
 import pymupdf
 import pytest
 
+from app.errors import OmrError
 from app.healthy_omr import (
     OPTION_ORDER,
     calculate_fill_features,
@@ -190,6 +191,23 @@ def test_single_page_pdf_is_rasterized_to_canonical_size() -> None:
     document.close()
     image = _decode_image(pdf_bytes)
     assert image.shape[:2] == (3508, 2480)
+
+
+def test_pdf_analysis_does_not_try_rotated_orientations(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.omr as omr_module
+
+    document = pymupdf.open()
+    page = document.new_page(width=595.2756, height=841.8898)
+    page.insert_text((72, 72), "not the canonical survey")
+    pdf_bytes = document.write()
+    document.close()
+
+    def fail_if_called(_image: np.ndarray) -> list[np.ndarray]:
+        raise AssertionError("PDF analysis must not generate rotated image candidates")
+
+    monkeypatch.setattr(omr_module, "_orientation_candidates", fail_if_called)
+    with pytest.raises(OmrError):
+        omr_module.analyze_image_bytes(pdf_bytes)
 
 
 def test_debug_images_include_all_required_stages(tmp_path: Path) -> None:
