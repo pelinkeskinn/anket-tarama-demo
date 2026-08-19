@@ -110,11 +110,11 @@ def test_circle_grid_selects_the_correct_pdf_revision() -> None:
     [
         ("filled", "MARKED"),
         ("blank", "BLANK"),
-        ("tick", "INVALID"),
-        ("x", "INVALID"),
-        ("line", "INVALID"),
-        ("half", "INVALID"),
-        ("dot", "INVALID"),
+        ("tick", "MARKED"),
+        ("x", "MARKED"),
+        ("line", "MARKED"),
+        ("half", "MARKED"),
+        ("dot", "MARKED"),
     ],
 )
 def test_strict_mark_classifier_obeys_form_rules(style: str, expected_status: str) -> None:
@@ -133,6 +133,19 @@ def test_two_filled_options_are_multiple() -> None:
     filled = calculate_fill_features(marked_image, marked_box)
     blank = calculate_fill_features(blank_image, blank_box)
     answer = evaluate_question(question, [filled, blank, filled, blank])
+    assert answer.status == "MULTIPLE"
+    assert answer.value is None
+
+
+def test_two_irregular_marks_are_multiple() -> None:
+    question = healthy_template()["questions"][0]
+    tick_image, tick_box = marked_roi("tick")
+    cross_image, cross_box = marked_roi("x")
+    blank_image, blank_box = marked_roi("blank")
+    tick = calculate_fill_features(tick_image, tick_box)
+    cross = calculate_fill_features(cross_image, cross_box)
+    blank = calculate_fill_features(blank_image, blank_box)
+    answer = evaluate_question(question, [tick, blank, cross, blank])
     assert answer.status == "MULTIPLE"
     assert answer.value is None
 
@@ -158,9 +171,9 @@ def test_invalid_and_multiple_answers_require_review_in_full_analysis() -> None:
     answers = {answer.questionNo: answer for answer in response.answers}
     assert response.templateCode == "HEALTHY_NUTRITION_V1"
     assert response.status == "REVIEW_REQUIRED"
-    assert response.reviewRequiredCount == 4
+    assert response.reviewRequiredCount == 1
     assert answers[1].status == "MARKED"
-    assert [answers[number].status for number in (2, 3, 4)] == ["INVALID"] * 3
+    assert [answers[number].status for number in (2, 3, 4)] == ["MARKED"] * 3
     assert answers[5].status == "MULTIPLE"
 
 

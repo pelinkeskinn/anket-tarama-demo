@@ -15,6 +15,8 @@ OPTION_ORDER = ("NEVER", "SOMETIMES", "OFTEN", "ALWAYS")
 MARK_SCORE_THRESHOLD = 0.65
 AMBIGUOUS_SCORE_THRESHOLD = 0.38
 MIN_INK_RATIO = 0.055
+CLEAR_HAND_MARK_SCORE = 0.14
+CLEAR_HAND_MARK_MARGIN = 0.06
 
 
 @dataclass(frozen=True)
@@ -124,6 +126,7 @@ def evaluate_question(question: dict[str, Any], features: list[FillFeatures]) ->
     scores = [feature.score for feature in features]
     filled = [index for index, feature in enumerate(features) if feature.is_filled]
     inked = [index for index, feature in enumerate(features) if feature.has_ink]
+    hand_marked = [index for index, feature in enumerate(features) if _is_clear_hand_mark(feature)]
     strongest_index = int(np.argmax(scores))
     strongest = features[strongest_index]
 
@@ -155,6 +158,31 @@ def evaluate_question(question: dict[str, Any], features: list[FillFeatures]) ->
             **common,
         )
 
+    # Respondents do not always fill a bubble completely. A single, clearly
+    # dominant tick, cross, slash, dot or partial fill still expresses an
+    # unambiguous choice and should not make the whole form fail review.
+    if len(hand_marked) >= 2:
+        confidence = min(0.99, 0.68 + min(scores[index] for index in hand_marked) * 0.25)
+        return AnswerResult(value=None, confidence=round(confidence, 3), source="UNRESOLVED", status="MULTIPLE", **common)
+
+    if len(hand_marked) == 1:
+        selected_index = hand_marked[0]
+        runner_up = max(score for index, score in enumerate(scores) if index != selected_index)
+        margin = scores[selected_index] - runner_up
+        if margin >= CLEAR_HAND_MARK_MARGIN:
+            option = OPTION_ORDER[selected_index]
+            label = str(question["optionLabels"][option])
+            confidence = min(0.94, 0.70 + scores[selected_index] * 0.20 + margin * 0.20)
+            return AnswerResult(
+                value=option,
+                confidence=round(confidence, 3),
+                source="AUTO",
+                status="MARKED",
+                selectedIndex=selected_index,
+                selectedLabel=label,
+                **common,
+            )
+
     if not inked:
         confidence = min(0.99, 0.85 + max(0.0, MIN_INK_RATIO - strongest.inner_dark_ratio))
         return AnswerResult(value="BLANK", confidence=round(confidence, 3), source="AUTO", status="BLANK", **common)
@@ -170,6 +198,19 @@ def evaluate_question(question: dict[str, Any], features: list[FillFeatures]) ->
 
     confidence = min(0.95, 0.68 + max(strongest.inner_dark_ratio, strongest.connected_component_ratio) * 0.25)
     return AnswerResult(value=None, confidence=round(confidence, 3), source="UNRESOLVED", status="INVALID", **common)
+
+
+def _is_clear_hand_mark(feature: FillFeatures) -> bool:
+    """Accept deliberate marks while rejecting isolated scan speckles."""
+    return bool(
+        feature.is_filled
+        or (
+            feature.score >= CLEAR_HAND_MARK_SCORE
+            and feature.inner_dark_ratio >= 0.10
+            and feature.connected_component_ratio >= 0.10
+            and (feature.center_dark_ratio >= 0.10 or max(feature.quadrant_coverage) >= 0.25)
+        )
+    )
 
 
 def template_match_score(warped: np.ndarray, template: dict[str, Any]) -> float:
