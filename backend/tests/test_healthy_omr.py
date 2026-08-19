@@ -113,6 +113,31 @@ def test_circle_grid_selects_the_correct_pdf_revision() -> None:
     assert template_match_score(revised_form, original) < 0.68
 
 
+def test_nutrition_template_hint_skips_unrelated_templates(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.omr as omr_module
+
+    healthy = healthy_template("HEALTHY_NUTRITION_V2")
+    unrelated = {**healthy, "templateCode": "UNRELATED_FORM"}
+    analyzed_codes: list[str] = []
+    original_analyze_template = omr_module._analyze_template
+
+    def track_template(*args: object, **kwargs: object):
+        template = args[1]
+        assert isinstance(template, dict)
+        analyzed_codes.append(str(template["templateCode"]))
+        return original_analyze_template(*args, **kwargs)
+
+    monkeypatch.setattr(omr_module, "load_templates", lambda: [unrelated, healthy])
+    monkeypatch.setattr(omr_module, "_analyze_template", track_template)
+    success, encoded = cv2.imencode(".png", canonical_blank_form(healthy))
+    assert success
+
+    response = omr_module.analyze_image_bytes(encoded.tobytes(), template_hint="HEALTHY_NUTRITION")
+
+    assert response.templateCode == "HEALTHY_NUTRITION_V2"
+    assert "UNRELATED_FORM" not in analyzed_codes
+
+
 @pytest.mark.parametrize(
     ("style", "expected_status"),
     [

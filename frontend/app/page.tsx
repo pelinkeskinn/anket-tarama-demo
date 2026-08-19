@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
-import { guideCaptureRegion } from "./camera";
+import { fullCameraFrame, guideCaptureRegion, type CaptureRegion } from "./camera";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://anket-tarama-backend.onrender.com").replace(/\/$/, "");
 const MAX_CAPTURE_SIDE = 2600;
@@ -245,6 +245,20 @@ export default function Page() {
     }
     const video = videoRef.current;
     const capture = guideCaptureRegion(video, frameRef.current);
+    const fullCapture = fullCameraFrame(video);
+    const blob = await cameraFrameBlob(video, capture);
+    const fallbackBlob =
+      capture.width < fullCapture.width * 0.95 || capture.height < fullCapture.height * 0.95
+        ? await cameraFrameBlob(video, fullCapture)
+        : null;
+    if (blob) {
+      await analyzeBlob(blob, { templateHint: "HEALTHY_NUTRITION", fallbackBlob });
+    } else if (automatic) {
+      autoCaptureRef.current = false;
+    }
+  }
+
+  async function cameraFrameBlob(video: HTMLVideoElement, capture: CaptureRegion) {
     const scale = Math.min(1, MAX_CAPTURE_SIDE / Math.max(capture.width, capture.height));
     const canvas = document.createElement("canvas");
     canvas.width = capture.width;
@@ -257,15 +271,13 @@ export default function Page() {
       context.imageSmoothingQuality = "high";
     }
     context?.drawImage(video, capture.x, capture.y, capture.width, capture.height, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", CAMERA_JPEG_QUALITY));
-    if (blob) {
-      await analyzeBlob(blob);
-    } else if (automatic) {
-      autoCaptureRef.current = false;
-    }
+    return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", CAMERA_JPEG_QUALITY));
   }
 
-  async function analyzeBlob(blob: Blob) {
+  async function analyzeBlob(
+    blob: Blob,
+    options: { templateHint?: "HEALTHY_NUTRITION"; fallbackBlob?: Blob | null } = {}
+  ) {
     if (submittingRef.current) {
       return;
     }
@@ -282,17 +294,30 @@ export default function Page() {
 
     try {
       await warmBackend();
-      const body = new FormData();
-      body.append("image", blob, blob.type === "application/pdf" ? "scan.pdf" : "scan.jpg");
-      body.append("clientRequestId", crypto.randomUUID());
-      const response = await fetch(`${API_BASE}/api/omr/analyze`, { method: "POST", body, signal: controller.signal });
+      const postAnalysis = async (candidate: Blob) => {
+        const body = new FormData();
+        body.append("image", candidate, candidate.type === "application/pdf" ? "scan.pdf" : "scan.jpg");
+        body.append("clientRequestId", crypto.randomUUID());
+        if (options.templateHint) body.append("templateHint", options.templateHint);
+        return await fetch(`${API_BASE}/api/omr/analyze`, { method: "POST", body, signal: controller.signal });
+      };
+
+      let response = await postAnalysis(blob);
+      if (!response.ok && options.fallbackBlob) response = await postAnalysis(options.fallbackBlob);
       if (!isCurrentAnalyzeRequest(requestId)) {
         return;
       }
       if (!response.ok) {
         throw new Error(await extractError(response));
       }
-      const payload = (await response.json()) as Analysis;
+      let payload = (await response.json()) as Analysis;
+      if (
+        options.fallbackBlob &&
+        (payload.status === "TOO_MANY_UNCERTAIN" || !payload.templateCode.startsWith("HEALTHY_NUTRITION_V"))
+      ) {
+        const fallbackResponse = await postAnalysis(options.fallbackBlob);
+        if (fallbackResponse.ok) payload = (await fallbackResponse.json()) as Analysis;
+      }
       if (!isCurrentAnalyzeRequest(requestId)) {
         return;
       }

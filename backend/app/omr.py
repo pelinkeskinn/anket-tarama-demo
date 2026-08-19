@@ -33,7 +33,7 @@ OK_STATUSES = {"OK", "MARKED"}
 REVIEW_STATUSES = {"DOUBLE_MARK", "UNCERTAIN", "MULTIPLE", "INVALID", "AMBIGUOUS"}
 
 
-def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
+def analyze_image_bytes(image_bytes: bytes, template_hint: str | None = None) -> AnalyzeResponse:
     if not image_bytes or len(image_bytes) > MAX_UPLOAD_BYTES:
         raise OmrError("INVALID_FILE")
 
@@ -46,7 +46,7 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
     candidates: list[tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int, tuple[np.ndarray, bool]]] = []
     saw_invalid_template = False
     templates = load_templates()
-    if is_pdf:
+    if is_pdf or template_hint == "HEALTHY_NUTRITION":
         templates = [template for template in templates if is_healthy_template(template)]
     # PDF pages are rasterized by their page coordinate system and are already
     # upright. Trying four rotations multiplies Render CPU time and can push a

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.models import AnalyzeResponse, ProcessingStats
 
 
 client = TestClient(app)
@@ -36,4 +37,33 @@ def test_invalid_upload_error_model() -> None:
     )
     assert response.status_code == 400
     assert response.json()["detail"]["error"]["code"] == "INVALID_FILE"
+
+
+def test_camera_template_hint_is_forwarded(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import app.api.omr as omr_api
+
+    received: dict[str, str | None] = {}
+
+    def fake_analyze(_data: bytes, template_hint: str | None = None) -> AnalyzeResponse:
+        received["templateHint"] = template_hint
+        return AnalyzeResponse(
+            analysisId="test-hint",
+            templateCode="HEALTHY_NUTRITION_V2",
+            status="OK",
+            formConfidence=1,
+            blankCount=0,
+            reviewRequiredCount=0,
+            answers=[],
+            processing=ProcessingStats(totalMs=1, perspectiveMs=0, omrMs=1),
+        )
+
+    monkeypatch.setattr(omr_api, "analyze_image_bytes", fake_analyze)
+    response = client.post(
+        "/api/omr/analyze",
+        data={"clientRequestId": "camera-test", "templateHint": "HEALTHY_NUTRITION"},
+        files={"image": ("camera.jpg", b"jpeg", "image/jpeg")},
+    )
+
+    assert response.status_code == 200
+    assert received["templateHint"] == "HEALTHY_NUTRITION"
 
