@@ -43,7 +43,7 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
     _validate_quality(image)
 
     is_pdf = image_bytes.startswith(b"%PDF")
-    candidates: list[tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int]] = []
+    candidates: list[tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int, tuple[np.ndarray, bool]]] = []
     saw_invalid_template = False
     templates = load_templates()
     if is_pdf:
@@ -59,9 +59,23 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
             try:
                 aspect_key = round(float(template["pageWidth"]) / float(template["pageHeight"]), 4)
                 if aspect_key not in warp_sources:
-                    warp_sources[aspect_key] = _find_warp_source(oriented_image, template)
-                template_result, answers, perspective_ms, omr_ms = _analyze_template(oriented_image, template, warp_sources[aspect_key])
-                candidates.append((oriented_image, template_result, answers, perspective_ms, omr_ms))
+                    warp_sources[aspect_key] = _pdf_page_corners(oriented_image) if is_pdf else _find_warp_source(oriented_image, template)
+                try:
+                    template_result, answers, perspective_ms, omr_ms = _analyze_template(
+                        oriented_image, template, warp_sources[aspect_key]
+                    )
+                except OmrError as exc:
+                    # A PDF page normally already is the normalized sheet. If
+                    # its contents came from a skewed scan, fall back to the
+                    # slower marker/page detector instead of rejecting it.
+                    if not is_pdf or exc.code != "INVALID_TEMPLATE":
+                        raise
+                    detected_source = _find_warp_source(oriented_image, template)
+                    warp_sources[aspect_key] = detected_source
+                    template_result, answers, perspective_ms, omr_ms = _analyze_template(
+                        oriented_image, template, detected_source
+                    )
+                candidates.append((oriented_image, template_result, answers, perspective_ms, omr_ms, warp_sources[aspect_key]))
                 if is_healthy_template(template_result) and float(template_result.get("_matchScore", 0.0)) >= 0.72:
                     matched_healthy_template = True
                     break
@@ -76,14 +90,16 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
             break
     if not candidates:
         raise OmrError("INVALID_TEMPLATE" if saw_invalid_template else "ALIGNMENT_FAILED")
-    selected_image, template, answers, perspective_ms, omr_ms = max(candidates, key=_analysis_score)
+    selected_image, template, answers, perspective_ms, omr_ms, selected_warp_source = max(candidates, key=_analysis_score)
     if _needs_robust_read(answers):
         robust_start = time.perf_counter()
         reading_template = _scaled_template(template, ANALYSIS_SCALE)
-        robust_answers = _read_answers_robust(_warp_to_template(selected_image, reading_template), reading_template)
+        robust_answers = _read_answers_robust(
+            _warp_to_template(selected_image, reading_template, selected_warp_source), reading_template
+        )
         robust_ms = _elapsed_ms(robust_start)
-        if _analysis_score((selected_image, template, robust_answers, perspective_ms, omr_ms)) > _analysis_score(
-            (selected_image, template, answers, perspective_ms, omr_ms)
+        if _analysis_score((selected_image, template, robust_answers, perspective_ms, omr_ms, selected_warp_source)) > _analysis_score(
+            (selected_image, template, answers, perspective_ms, omr_ms, selected_warp_source)
         ):
             answers = robust_answers
             omr_ms += robust_ms
@@ -103,9 +119,9 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
         status = "REVIEW_REQUIRED"
 
     if OMR_DEBUG_ENABLED and is_healthy_template(template):
-        debug_source = _find_warp_source(selected_image, template)[0]
+        debug_source = selected_warp_source[0]
         debug_template = _scaled_template(template, ANALYSIS_SCALE)
-        debug_warped = _warp_to_template(selected_image, debug_template)
+        debug_warped = _warp_to_template(selected_image, debug_template, selected_warp_source)
         generate_debug_images(selected_image, debug_warped, debug_source, debug_template, answers, analysis_id, OMR_DEBUG_DIR)
 
     return AnalyzeResponse(
@@ -142,8 +158,11 @@ def _analyze_template(
     return template_result, answers, perspective_ms, omr_ms
 
 
-def _analysis_score(candidate: tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int]) -> tuple[float, float, float, float]:
-    _, template, answers, _, _ = candidate
+def _analysis_score(candidate: tuple[Any, ...]) -> tuple[float, float, float, float]:
+    # Internal reading variants use the original five-field tuple while the
+    # top-level candidates also carry their reusable warp source.
+    template = candidate[1]
+    answers = candidate[2]
     answer_count = max(len(answers), 1)
     ok_count = sum(1 for answer in answers if answer.status in OK_STATUSES)
     review_required_count = sum(1 for answer in answers if answer.status in REVIEW_STATUSES)
@@ -206,6 +225,14 @@ def _orientation_candidates(image: np.ndarray) -> list[np.ndarray]:
         cv2.rotate(image, cv2.ROTATE_180),
         cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE),
     ]
+
+
+def _pdf_page_corners(image: np.ndarray) -> tuple[np.ndarray, bool]:
+    height, width = image.shape[:2]
+    return (
+        np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype=np.float32),
+        True,
+    )
 
 
 def _validate_quality(image: np.ndarray) -> None:

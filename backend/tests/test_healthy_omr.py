@@ -251,6 +251,27 @@ def test_pdf_analysis_does_not_try_rotated_orientations(monkeypatch: pytest.Monk
         omr_module.analyze_image_bytes(pdf_bytes)
 
 
+def test_normalized_pdf_uses_page_coordinates_without_marker_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.omr as omr_module
+
+    template = healthy_template("HEALTHY_NUTRITION_V2")
+    success, encoded = cv2.imencode(".jpg", canonical_blank_form(template), [cv2.IMWRITE_JPEG_QUALITY, 92])
+    assert success
+    document = pymupdf.open()
+    page = document.new_page(width=template["pageWidth"], height=template["pageHeight"])
+    page.insert_image(page.rect, stream=encoded.tobytes())
+    pdf_bytes = document.write()
+    document.close()
+
+    def fail_if_called(_image: np.ndarray, _template: dict) -> tuple[np.ndarray, bool]:
+        raise AssertionError("normalized PDF must not run marker detection")
+
+    monkeypatch.setattr(omr_module, "_find_warp_source", fail_if_called)
+    response = omr_module.analyze_image_bytes(pdf_bytes)
+    assert response.templateCode == "HEALTHY_NUTRITION_V2"
+    assert response.status == "OK"
+
+
 def test_debug_images_include_all_required_stages(tmp_path: Path) -> None:
     template = healthy_template()
     form = canonical_blank_form()
