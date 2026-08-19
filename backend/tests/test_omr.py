@@ -230,7 +230,7 @@ def test_child_style_marks_are_read_correctly(style: str) -> None:
 def test_missing_markers_returns_error() -> None:
     with pytest.raises(OmrError) as exc:
         analyze_image_bytes(image_bytes("blank-form.png").replace(b"\x00", b"\xff", 1000))
-    assert exc.value.code in {"MARKERS_NOT_FOUND", "INVALID_FILE"}
+    assert exc.value.code in {"MARKERS_NOT_FOUND", "ALIGNMENT_FAILED", "INVALID_FILE"}
 
 
 def test_non_image_file_is_rejected() -> None:
@@ -263,10 +263,10 @@ def test_form_confidence_is_generated() -> None:
     assert 0 < response.formConfidence <= 1
 
 
-def test_healthy_nutrition_v2_template_has_26_four_option_questions() -> None:
+def test_healthy_nutrition_template_has_26_four_option_questions() -> None:
     from app.template import load_templates
 
-    template = next(item for item in load_templates() if item["templateCode"] == "HEALTHY_NUTRITION_V2")
+    template = next(item for item in load_templates() if item["templateCode"] == "HEALTHY_NUTRITION_V1")
     assert template["questionCount"] == 26
     assert [question["questionNo"] for question in template["questions"]] == list(range(1, 27))
     assert all(list(question["options"]) == ["NEVER", "SOMETIMES", "OFTEN", "ALWAYS"] for question in template["questions"])

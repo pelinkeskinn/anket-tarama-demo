@@ -15,9 +15,12 @@ from app.config import (
     MARK_THRESHOLD,
     MAX_MANUAL_REVIEW_QUESTIONS,
     MAX_UPLOAD_BYTES,
+    OMR_DEBUG_DIR,
+    OMR_DEBUG_ENABLED,
     UNCERTAIN_MARGIN,
 )
 from app.errors import OmrError
+from app.healthy_omr import generate_debug_images, is_healthy_template, read_answers as read_healthy_answers, template_match_score
 from app.models import AnalyzeResponse, AnswerResult, ProcessingStats
 from app.template import load_templates
 
@@ -26,6 +29,8 @@ OPTION_ORDER = ("NEVER", "SOMETIMES", "OFTEN", "ALWAYS")
 MAX_ACCEPTED_BLANK_ANSWERS = 8
 LOW_CONTRAST_MARK_THRESHOLD = 0.12
 ANALYSIS_SCALE = 0.8
+OK_STATUSES = {"OK", "MARKED"}
+REVIEW_STATUSES = {"DOUBLE_MARK", "UNCERTAIN", "MULTIPLE", "INVALID", "AMBIGUOUS"}
 
 
 def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
@@ -33,13 +38,18 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
         raise OmrError("INVALID_FILE")
 
     start = time.perf_counter()
+    analysis_id = f"demo-{uuid.uuid4().hex[:12]}"
     image = _decode_image(image_bytes)
     _validate_quality(image)
 
     candidates: list[tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int]] = []
+    saw_invalid_template = False
+    templates = load_templates()
+    if image_bytes.startswith(b"%PDF"):
+        templates = [template for template in templates if is_healthy_template(template)]
     for oriented_image in _orientation_candidates(image):
         warp_sources: dict[float, tuple[np.ndarray, bool]] = {}
-        for template in load_templates():
+        for template in templates:
             try:
                 aspect_key = round(float(template["pageWidth"]) / float(template["pageHeight"]), 4)
                 if aspect_key not in warp_sources:
@@ -47,10 +57,11 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
                 template_result, answers, perspective_ms, omr_ms = _analyze_template(oriented_image, template, warp_sources[aspect_key])
                 candidates.append((oriented_image, template_result, answers, perspective_ms, omr_ms))
             except OmrError as exc:
-                if exc.code != "MARKERS_NOT_FOUND":
+                saw_invalid_template = saw_invalid_template or exc.code == "INVALID_TEMPLATE"
+                if exc.code not in {"MARKERS_NOT_FOUND", "ALIGNMENT_FAILED", "INVALID_TEMPLATE"}:
                     raise
     if not candidates:
-        raise OmrError("MARKERS_NOT_FOUND")
+        raise OmrError("INVALID_TEMPLATE" if saw_invalid_template else "ALIGNMENT_FAILED")
     selected_image, template, answers, perspective_ms, omr_ms = max(candidates, key=_analysis_score)
     if _needs_robust_read(answers):
         robust_start = time.perf_counter()
@@ -63,17 +74,25 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
             answers = robust_answers
             omr_ms += robust_ms
 
-    review_required_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
+    review_required_count = sum(1 for answer in answers if answer.status in REVIEW_STATUSES)
     blank_count = sum(1 for answer in answers if answer.status == "BLANK")
     form_confidence = _form_confidence(answers)
     status = "OK"
-    if review_required_count > MAX_MANUAL_REVIEW_QUESTIONS or blank_count > MAX_ACCEPTED_BLANK_ANSWERS:
+    if review_required_count > MAX_MANUAL_REVIEW_QUESTIONS or (
+        blank_count > MAX_ACCEPTED_BLANK_ANSWERS and not is_healthy_template(template)
+    ):
         status = "TOO_MANY_UNCERTAIN"
     elif review_required_count > 0:
         status = "REVIEW_REQUIRED"
 
+    if OMR_DEBUG_ENABLED and is_healthy_template(template):
+        debug_source = _find_warp_source(selected_image, template)[0]
+        debug_template = _scaled_template(template, ANALYSIS_SCALE)
+        debug_warped = _warp_to_template(selected_image, debug_template)
+        generate_debug_images(selected_image, debug_warped, debug_source, debug_template, answers, analysis_id, OMR_DEBUG_DIR)
+
     return AnalyzeResponse(
-        analysisId=f"demo-{uuid.uuid4().hex[:12]}",
+        analysisId=analysis_id,
         templateCode=str(template["templateCode"]),
         status=status,
         formConfidence=form_confidence,
@@ -95,37 +114,62 @@ def _analyze_template(
     perspective_ms = _elapsed_ms(perspective_start)
 
     omr_start = time.perf_counter()
+    template_result = template
+    if is_healthy_template(reading_template):
+        match_score = template_match_score(warped, reading_template)
+        if match_score < 0.68:
+            raise OmrError("INVALID_TEMPLATE")
+        template_result = {**template, "_matchScore": match_score}
     answers = _read_answers(warped, reading_template)
     omr_ms = _elapsed_ms(omr_start)
-    return template, answers, perspective_ms, omr_ms
+    return template_result, answers, perspective_ms, omr_ms
 
 
 def _analysis_score(candidate: tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int]) -> tuple[float, float, float, float]:
-    _, _, answers, _, _ = candidate
+    _, template, answers, _, _ = candidate
     answer_count = max(len(answers), 1)
-    ok_count = sum(1 for answer in answers if answer.status == "OK")
-    review_required_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
+    ok_count = sum(1 for answer in answers if answer.status in OK_STATUSES)
+    review_required_count = sum(1 for answer in answers if answer.status in REVIEW_STATUSES)
     blank_count = sum(1 for answer in answers if answer.status == "BLANK")
     # Template/orientation selection must be driven by answers for which actual
     # mark evidence was found.  A blank answer can legitimately have confidence
     # 1.0, so putting form confidence first lets a wrong template full of
     # "confident blanks" beat the correct template when marks are light or odd.
     return (
+        float(template.get("_matchScore", 0.0)),
         ok_count / answer_count,
         -review_required_count / answer_count,
-        -blank_count / answer_count,
-        _form_confidence(answers),
+        _form_confidence(answers) - blank_count / answer_count * 0.1,
     )
 
 
 def _needs_robust_read(answers: list[AnswerResult]) -> bool:
-    uncertain_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
+    uncertain_count = sum(1 for answer in answers if answer.status in REVIEW_STATUSES)
     blank_count = sum(1 for answer in answers if answer.status == "BLANK")
-    low_confidence_count = sum(1 for answer in answers if answer.status == "OK" and answer.confidence < 0.78)
+    low_confidence_count = sum(1 for answer in answers if answer.status in OK_STATUSES and answer.confidence < 0.78)
     return uncertain_count > 0 or blank_count > 0 or low_confidence_count > 4
 
 
 def _decode_image(image_bytes: bytes) -> np.ndarray:
+    if image_bytes.startswith(b"%PDF"):
+        try:
+            import pymupdf
+
+            with pymupdf.open(stream=image_bytes, filetype="pdf") as document:
+                if len(document) != 1:
+                    raise OmrError("INVALID_FILE")
+                page = document[0]
+                matrix = pymupdf.Matrix(2480 / page.rect.width, 3508 / page.rect.height)
+                pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+                rgb = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(pixmap.height, pixmap.width, pixmap.n)
+                image = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        except OmrError:
+            raise
+        except Exception as exc:
+            raise OmrError("INVALID_FILE") from exc
+        if image.size == 0:
+            raise OmrError("INVALID_FILE")
+        return image
     try:
         with Image.open(BytesIO(image_bytes)) as pil_image:
             corrected = ImageOps.exif_transpose(pil_image).convert("RGB")
@@ -162,15 +206,27 @@ def _warp_to_template(image: np.ndarray, template: dict[str, Any], warp_source: 
     page_width = float(template["pageWidth"])
     page_height = float(template["pageHeight"])
     half = marker_size / 2
-    destination = np.array(
-        [
-            [marker_margin + half, marker_margin + half],
-            [page_width - marker_margin - half, marker_margin + half],
-            [page_width - marker_margin - half, page_height - marker_margin - half],
-            [marker_margin + half, page_height - marker_margin - half],
-        ],
-        dtype=np.float32,
-    )
+    marker_centers = template.get("markerCenters")
+    if isinstance(marker_centers, dict):
+        destination = np.array(
+            [
+                [marker_centers["topLeft"]["x"], marker_centers["topLeft"]["y"]],
+                [marker_centers["topRight"]["x"], marker_centers["topRight"]["y"]],
+                [marker_centers["bottomRight"]["x"], marker_centers["bottomRight"]["y"]],
+                [marker_centers["bottomLeft"]["x"], marker_centers["bottomLeft"]["y"]],
+            ],
+            dtype=np.float32,
+        )
+    else:
+        destination = np.array(
+            [
+                [marker_margin + half, marker_margin + half],
+                [page_width - marker_margin - half, marker_margin + half],
+                [page_width - marker_margin - half, page_height - marker_margin - half],
+                [marker_margin + half, page_height - marker_margin - half],
+            ],
+            dtype=np.float32,
+        )
     source, uses_page_corners = warp_source if warp_source is not None else _find_warp_source(image, template)
     if uses_page_corners:
         destination = np.array(
@@ -199,7 +255,10 @@ def _find_warp_source(image: np.ndarray, template: dict[str, Any]) -> tuple[np.n
         try:
             return _find_page_corners(image, page_width / page_height), True
         except OmrError:
-            return _find_marker_centers(image, page_width / page_height, allow_small=True), False
+            try:
+                return _find_marker_centers(image, page_width / page_height, allow_small=True), False
+            except OmrError as exc:
+                raise OmrError("ALIGNMENT_FAILED") from exc
 
 
 def _find_aruco_marker_centers(image: np.ndarray, template: dict[str, Any]) -> np.ndarray | None:
@@ -243,7 +302,7 @@ def _find_aruco_marker_centers(image: np.ndarray, template: dict[str, Any]) -> n
 def _scaled_template(template: dict[str, Any], scale: float) -> dict[str, Any]:
     if scale == 1:
         return template
-    return {
+    scaled = {
         **template,
         "pageWidth": int(round(float(template["pageWidth"]) * scale)),
         "pageHeight": int(round(float(template["pageHeight"]) * scale)),
@@ -265,6 +324,23 @@ def _scaled_template(template: dict[str, Any], scale: float) -> dict[str, Any]:
             for question in template["questions"]
         ],
     }
+    if isinstance(template.get("markerCenters"), dict):
+        scaled["markerCenters"] = {
+            key: {"x": float(point["x"]) * scale, "y": float(point["y"]) * scale}
+            for key, point in template["markerCenters"].items()
+        }
+    if isinstance(template.get("sectionBands"), list):
+        scaled["sectionBands"] = [
+            {
+                **band,
+                "x": int(round(float(band["x"]) * scale)),
+                "y": int(round(float(band["y"]) * scale)),
+                "width": int(round(float(band["width"]) * scale)),
+                "height": int(round(float(band["height"]) * scale)),
+            }
+            for band in template["sectionBands"]
+        ]
+    return scaled
 
 
 def _find_marker_centers(image: np.ndarray, target_aspect: float, allow_small: bool = False) -> np.ndarray:
@@ -484,16 +560,6 @@ def _has_consistent_edges(points: np.ndarray) -> bool:
 def _find_page_corners(image: np.ndarray, target_aspect: float) -> np.ndarray:
     height, width = image.shape[:2]
     aspect = width / max(height, 1)
-    if abs(aspect - target_aspect) / target_aspect <= 0.18:
-        return np.array(
-            [
-                [0, 0],
-                [width - 1, 0],
-                [width - 1, height - 1],
-                [0, height - 1],
-            ],
-            dtype=np.float32,
-        )
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -525,6 +591,20 @@ def _find_page_corners(image: np.ndarray, target_aspect: float) -> np.ndarray:
     if candidates:
         return max(candidates, key=lambda item: item[0])[1]
 
+    # A scanner may produce a page that exactly fills the image.  This is a
+    # fallback only after contour detection, otherwise a similarly-proportioned
+    # camera frame would be mistaken for the page and perspective would remain.
+    if abs(aspect - target_aspect) / target_aspect <= 0.18:
+        return np.array(
+            [
+                [0, 0],
+                [width - 1, 0],
+                [width - 1, height - 1],
+                [0, height - 1],
+            ],
+            dtype=np.float32,
+        )
+
     raise OmrError("MARKERS_NOT_FOUND")
 
 
@@ -542,6 +622,8 @@ def _order_points(points: np.ndarray) -> np.ndarray:
 
 def _read_answers(warped: np.ndarray, template: dict[str, Any]) -> list[AnswerResult]:
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    if is_healthy_template(template):
+        return read_healthy_answers(gray, template)
     answers = _read_answers_from_gray(gray, template)
     if template.get("templateCode") == "KR_SURVEY_V1":
         corrected = _read_answers_from_gray(gray, template, _kizilay_right_column_curve_shifts())
@@ -552,6 +634,9 @@ def _read_answers(warped: np.ndarray, template: dict[str, Any]) -> list[AnswerRe
 
 def _read_answers_robust(warped: np.ndarray, template: dict[str, Any]) -> list[AnswerResult]:
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    if is_healthy_template(template):
+        candidates = [read_healthy_answers(variant, template) for variant in _gray_reading_variants(gray)]
+        return max(candidates, key=_answers_quality_score)
     answers = _read_best_from_gray_variants(gray, template, use_local_search=True)
     if template.get("templateCode") == "KR_SURVEY_V1":
         corrected = _read_best_from_gray_variants(
@@ -579,8 +664,8 @@ def _read_best_from_gray_variants(
 
 
 def _answers_quality_score(answers: list[AnswerResult]) -> tuple[int, int, float, int]:
-    ok_count = sum(1 for answer in answers if answer.status == "OK")
-    review_required_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
+    ok_count = sum(1 for answer in answers if answer.status in OK_STATUSES)
+    review_required_count = sum(1 for answer in answers if answer.status in REVIEW_STATUSES)
     blank_count = sum(1 for answer in answers if answer.status == "BLANK")
     return (ok_count, -review_required_count, _form_confidence(answers), -blank_count)
 
@@ -757,9 +842,9 @@ def _form_confidence(answers: list[AnswerResult]) -> float:
     score = 0.0
     for answer in answers:
         penalty = 1.0
-        if answer.status == "DOUBLE_MARK":
+        if answer.status in {"DOUBLE_MARK", "MULTIPLE"}:
             penalty = 0.35
-        elif answer.status == "UNCERTAIN":
+        elif answer.status in {"UNCERTAIN", "INVALID", "AMBIGUOUS"}:
             penalty = 0.5
         elif answer.status == "BLANK":
             penalty = 0.9

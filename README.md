@@ -123,6 +123,22 @@ Eşikler `backend/app/config.py` içinde ortam değişkenlerinden okunur:
 - `OMR_DOUBLE_MARK_THRESHOLD`
 - `MAX_MANUAL_REVIEW_QUESTIONS`
 
+Sağlıklı Beslenme formu genel OMR eşiklerini kullanmaz. Bu formun PDF'den bir kez kalibre edilen
+26 soru / 104 dairelik normalize koordinatları
+`backend/templates/healthy_nutrition_survey_v1.json` ve `healthy_nutrition_survey_v2.json` dosyalarındadır.
+Satır aralıkları farklı olan iki PDF revizyonu daire iç geometrisiyle otomatik ayrılır. Tam ve dengeli dolgu `MARKED`;
+tik, X, tek çizgi, küçük nokta ve yarım dolgu `INVALID`; iki dolu daire `MULTIPLE` döner.
+
+Tek sayfalı PDF veya görüntü yüklenebilir. Debug görsellerini açmak için:
+
+```text
+OMR_DEBUG_ENABLED=1
+OMR_DEBUG_DIR=backend/debug
+```
+
+Her analiz için orijinal, marker, perspektif, ROI, threshold ve nihai overlay görselleri ayrı bir
+`analysisId` klasörüne yazılır. Production ortamında fotoğraf saklama politikası nedeniyle varsayılan kapalıdır.
+
 Örnek değerler `backend/.env.example` dosyasındadır.
 
 ## API

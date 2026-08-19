@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/omr", tags=["omr"])
 async def analyze(image: UploadFile = File(...), clientRequestId: str = Form(...)) -> AnalyzeResponse:
     if not clientRequestId.strip() or len(clientRequestId) > 64:
         raise http_error("UPLOAD_FAILED")
-    if image.content_type and not image.content_type.startswith("image/"):
+    if image.content_type and not (image.content_type.startswith("image/") or image.content_type == "application/pdf"):
         raise http_error("INVALID_FILE")
 
     data = await image.read(MAX_UPLOAD_BYTES + 1)

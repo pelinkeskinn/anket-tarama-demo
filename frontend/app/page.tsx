@@ -10,7 +10,7 @@ const CAMERA_CHECK_INTERVAL_MS = 300;
 const REQUIRED_STABLE_FRAMES = 3;
 
 type AnswerValue = "NEVER" | "SOMETIMES" | "OFTEN" | "ALWAYS" | "BLANK";
-type AnswerStatus = "OK" | "BLANK" | "DOUBLE_MARK" | "UNCERTAIN";
+type AnswerStatus = "OK" | "BLANK" | "DOUBLE_MARK" | "UNCERTAIN" | "MARKED" | "MULTIPLE" | "INVALID" | "AMBIGUOUS";
 type AnswerSource = "AUTO" | "MANUAL" | "UNRESOLVED";
 type Screen = "scanner" | "processing" | "manual" | "blankConfirm" | "success" | "duplicate" | "fatal" | "history" | "detail";
 
@@ -21,6 +21,10 @@ type Answer = {
   source: AnswerSource;
   status: AnswerStatus;
   manualCorrection?: string | null;
+  section?: number | null;
+  selectedIndex?: number | null;
+  selectedLabel?: string | null;
+  scores?: number[] | null;
 };
 
 type Analysis = {
@@ -54,8 +58,12 @@ const labels: Record<AnswerValue | AnswerStatus, string> = {
   ALWAYS: "Her zaman",
   BLANK: "Boş",
   OK: "Okundu",
+  MARKED: "Geçerli işaret",
   DOUBLE_MARK: "Çift işaret",
-  UNCERTAIN: "Belirsiz"
+  MULTIPLE: "Birden fazla işaret",
+  INVALID: "Geçersiz işaret",
+  UNCERTAIN: "Belirsiz",
+  AMBIGUOUS: "Kararsız"
 };
 
 const demoForms = [
@@ -168,7 +176,7 @@ export default function Page() {
   }, [cameraState, screen]);
 
   const reviewAnswers = useMemo(
-    () => analysis?.answers.filter((answer) => answer.status === "DOUBLE_MARK" || answer.status === "UNCERTAIN") ?? [],
+    () => analysis?.answers.filter((answer) => isReviewStatus(answer.status)) ?? [],
     [analysis]
   );
 
@@ -263,7 +271,7 @@ export default function Page() {
     try {
       await warmBackend();
       const body = new FormData();
-      body.append("image", blob, "scan.jpg");
+      body.append("image", blob, blob.type === "application/pdf" ? "scan.pdf" : "scan.jpg");
       body.append("clientRequestId", crypto.randomUUID());
       const response = await fetch(`${API_BASE}/api/omr/analyze`, { method: "POST", body, signal: controller.signal });
       if (!isCurrentAnalyzeRequest(requestId)) {
@@ -353,7 +361,7 @@ export default function Page() {
         return {
           ...answer,
           value,
-          status: value === "BLANK" ? "BLANK" : "OK",
+          status: value === "BLANK" ? "BLANK" : analysis.templateCode.startsWith("HEALTHY_NUTRITION_V") ? "MARKED" : "OK",
           source: "MANUAL",
           confidence: 1,
           manualCorrection: answerOptionLabel(analysis.templateCode, answer.questionNo, value)
@@ -487,7 +495,7 @@ export default function Page() {
               TARAT
             </button>
             <label className="upload-card">
-              <input className="upload-input" type="file" accept="image/*" onChange={uploadTestImage} aria-label="Test Görseli Yükle" />
+              <input className="upload-input" type="file" accept="image/*,application/pdf" onChange={uploadTestImage} aria-label="Test Görseli Yükle" />
               <span className="upload-title">Anket fotoğrafı yükle</span>
               <span className="upload-copy">Bilgisayarındaki veya telefonundaki form fotoğrafını seçip doğrudan analiz et.</span>
               <span className="upload-action">Fotoğraf Seç</span>
@@ -807,11 +815,15 @@ function rememberSequence(payload: Analysis) {
 
 function answerOptionLabel(templateCode: string, questionNo: number, value: AnswerValue): string {
   if (value === "BLANK") return labels.BLANK;
-  if (templateCode === "HEALTHY_NUTRITION_V2" && questionNo >= 12) {
+  if (templateCode.startsWith("HEALTHY_NUTRITION_V") && questionNo >= 12) {
     return ({ NEVER: "Hiçbir zaman", SOMETIMES: "1-2 kez/hafta", OFTEN: "3-4 kez/hafta", ALWAYS: "5+ kez/hafta" } as const)[value];
   }
-  if (templateCode !== "HEALTHY_NUTRITION_V2") return labels[value];
+  if (!templateCode.startsWith("HEALTHY_NUTRITION_V")) return labels[value];
   return ({ NEVER: "Hiçbir zaman", SOMETIMES: "Ara sıra", OFTEN: "Sık sık", ALWAYS: "Her zaman" } as const)[value];
+}
+
+function isReviewStatus(status: AnswerStatus): boolean {
+  return status === "DOUBLE_MARK" || status === "UNCERTAIN" || status === "MULTIPLE" || status === "INVALID" || status === "AMBIGUOUS";
 }
 
 function fullCameraFrame(video: HTMLVideoElement) {

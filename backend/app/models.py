@@ -7,7 +7,16 @@ from pydantic import BaseModel, Field, model_validator
 
 
 AnswerValue = Literal["NEVER", "SOMETIMES", "OFTEN", "ALWAYS", "BLANK"]
-AnswerStatus = Literal["OK", "BLANK", "DOUBLE_MARK", "UNCERTAIN"]
+AnswerStatus = Literal[
+    "OK",
+    "BLANK",
+    "DOUBLE_MARK",
+    "UNCERTAIN",
+    "MARKED",
+    "MULTIPLE",
+    "INVALID",
+    "AMBIGUOUS",
+]
 AnswerSource = Literal["AUTO", "MANUAL", "UNRESOLVED"]
 
 
@@ -18,6 +27,10 @@ class AnswerResult(BaseModel):
     source: AnswerSource
     status: AnswerStatus
     manualCorrection: str | None = None
+    section: int | None = Field(default=None, ge=1, le=2)
+    selectedIndex: int | None = Field(default=None, ge=0, le=3)
+    selectedLabel: str | None = None
+    scores: list[float] | None = Field(default=None, min_length=4, max_length=4)
 
 
 class ProcessingStats(BaseModel):
