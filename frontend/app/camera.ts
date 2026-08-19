@@ -21,7 +21,9 @@ export function guideCaptureRegion(video: HTMLVideoElement, guide: HTMLElement |
   const renderedHeight = fallback.height * coverScale;
   const offsetX = (videoRect.width - renderedWidth) / 2;
   const offsetY = (videoRect.height - renderedHeight) / 2;
-  const padding = Math.min(guideRect.width, guideRect.height) * 0.035;
+  // Keep only a tiny safety margin: the guide itself represents the sheet
+  // boundary and the backend can use this crop as normalized page geometry.
+  const padding = Math.min(guideRect.width, guideRect.height) * 0.01;
 
   const displayLeft = guideRect.left - videoRect.left - padding;
   const displayTop = guideRect.top - videoRect.top - padding;

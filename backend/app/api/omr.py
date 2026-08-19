@@ -16,6 +16,7 @@ async def analyze(
     image: UploadFile = File(...),
     clientRequestId: str = Form(...),
     templateHint: str | None = Form(default=None),
+    guidedCapture: bool = Form(default=False),
 ) -> AnalyzeResponse:
     if not clientRequestId.strip() or len(clientRequestId) > 64:
         raise http_error("UPLOAD_FAILED")
@@ -27,7 +28,7 @@ async def analyze(
         raise http_error("INVALID_FILE", status_code=413)
 
     try:
-        return analyze_image_bytes(data, template_hint=templateHint)
+        return analyze_image_bytes(data, template_hint=templateHint, guided_capture=guidedCapture)
     except OmrError as exc:
         raise http_error(exc.code) from exc
     except Exception as exc:

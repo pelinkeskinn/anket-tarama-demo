@@ -252,7 +252,7 @@ export default function Page() {
         ? await cameraFrameBlob(video, fullCapture)
         : null;
     if (blob) {
-      await analyzeBlob(blob, { templateHint: "HEALTHY_NUTRITION", fallbackBlob });
+      await analyzeBlob(blob, { templateHint: "HEALTHY_NUTRITION", guidedCapture: true, fallbackBlob });
     } else if (automatic) {
       autoCaptureRef.current = false;
     }
@@ -276,7 +276,7 @@ export default function Page() {
 
   async function analyzeBlob(
     blob: Blob,
-    options: { templateHint?: "HEALTHY_NUTRITION"; fallbackBlob?: Blob | null } = {}
+    options: { templateHint?: "HEALTHY_NUTRITION"; guidedCapture?: boolean; fallbackBlob?: Blob | null } = {}
   ) {
     if (submittingRef.current) {
       return;
@@ -294,15 +294,16 @@ export default function Page() {
 
     try {
       await warmBackend();
-      const postAnalysis = async (candidate: Blob) => {
+      const postAnalysis = async (candidate: Blob, guidedCapture = false) => {
         const body = new FormData();
         body.append("image", candidate, candidate.type === "application/pdf" ? "scan.pdf" : "scan.jpg");
         body.append("clientRequestId", crypto.randomUUID());
         if (options.templateHint) body.append("templateHint", options.templateHint);
+        if (guidedCapture) body.append("guidedCapture", "true");
         return await fetch(`${API_BASE}/api/omr/analyze`, { method: "POST", body, signal: controller.signal });
       };
 
-      let response = await postAnalysis(blob);
+      let response = await postAnalysis(blob, options.guidedCapture);
       if (!response.ok && options.fallbackBlob) response = await postAnalysis(options.fallbackBlob);
       if (!isCurrentAnalyzeRequest(requestId)) {
         return;

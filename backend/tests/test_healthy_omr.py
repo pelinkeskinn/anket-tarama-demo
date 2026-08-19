@@ -157,6 +157,24 @@ def test_guided_camera_scan_accepts_degraded_but_aligned_grid(monkeypatch: pytes
     assert len(answers) == 26
 
 
+def test_guided_camera_crop_uses_its_a4_boundaries_before_marker_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.omr as omr_module
+
+    template = healthy_template("HEALTHY_NUTRITION_V2")
+    success, encoded = cv2.imencode(".jpg", canonical_blank_form(template), [cv2.IMWRITE_JPEG_QUALITY, 88])
+    assert success
+
+    def fail_if_called(_image: np.ndarray, _template: dict) -> tuple[np.ndarray, bool]:
+        raise AssertionError("aligned guided crop must use its A4 boundaries")
+
+    monkeypatch.setattr(omr_module, "_find_warp_source", fail_if_called)
+    response = omr_module.analyze_image_bytes(
+        encoded.tobytes(), template_hint="HEALTHY_NUTRITION", guided_capture=True
+    )
+    assert response.templateCode == "HEALTHY_NUTRITION_V2"
+    assert response.status == "OK"
+
+
 @pytest.mark.parametrize(
     ("style", "expected_status"),
     [

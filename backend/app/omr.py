@@ -33,7 +33,11 @@ OK_STATUSES = {"OK", "MARKED"}
 REVIEW_STATUSES = {"DOUBLE_MARK", "UNCERTAIN", "MULTIPLE", "INVALID", "AMBIGUOUS"}
 
 
-def analyze_image_bytes(image_bytes: bytes, template_hint: str | None = None) -> AnalyzeResponse:
+def analyze_image_bytes(
+    image_bytes: bytes,
+    template_hint: str | None = None,
+    guided_capture: bool = False,
+) -> AnalyzeResponse:
     if not image_bytes or len(image_bytes) > MAX_UPLOAD_BYTES:
         raise OmrError("INVALID_FILE")
 
@@ -49,11 +53,11 @@ def analyze_image_bytes(image_bytes: bytes, template_hint: str | None = None) ->
     is_guided_nutrition_scan = template_hint == "HEALTHY_NUTRITION"
     if is_pdf or is_guided_nutrition_scan:
         templates = [template for template in templates if is_healthy_template(template)]
-    healthy_match_threshold = 0.30 if is_guided_nutrition_scan else 0.68
+    healthy_match_threshold = 0.18 if guided_capture and is_guided_nutrition_scan else 0.30 if is_guided_nutrition_scan else 0.68
     # PDF pages are rasterized by their page coordinate system and are already
     # upright. Trying four rotations multiplies Render CPU time and can push a
     # valid request beyond the reverse proxy timeout.
-    oriented_images = [image] if is_pdf else _orientation_candidates(image)
+    oriented_images = [image] if is_pdf or guided_capture else _orientation_candidates(image)
     for oriented_image in oriented_images:
         warp_sources: dict[float, tuple[np.ndarray, bool]] = {}
         matched_healthy_template = False
@@ -61,7 +65,11 @@ def analyze_image_bytes(image_bytes: bytes, template_hint: str | None = None) ->
             try:
                 aspect_key = round(float(template["pageWidth"]) / float(template["pageHeight"]), 4)
                 if aspect_key not in warp_sources:
-                    warp_sources[aspect_key] = _pdf_page_corners(oriented_image) if is_pdf else _find_warp_source(oriented_image, template)
+                    warp_sources[aspect_key] = (
+                        _pdf_page_corners(oriented_image)
+                        if is_pdf or guided_capture
+                        else _find_warp_source(oriented_image, template)
+                    )
                 try:
                     template_result, answers, perspective_ms, omr_ms = _analyze_template(
                         oriented_image, template, warp_sources[aspect_key], healthy_match_threshold
@@ -70,7 +78,7 @@ def analyze_image_bytes(image_bytes: bytes, template_hint: str | None = None) ->
                     # A PDF page normally already is the normalized sheet. If
                     # its contents came from a skewed scan, fall back to the
                     # slower marker/page detector instead of rejecting it.
-                    if not is_pdf or exc.code != "INVALID_TEMPLATE":
+                    if not (is_pdf or guided_capture) or exc.code != "INVALID_TEMPLATE":
                         raise
                     detected_source = _find_warp_source(oriented_image, template)
                     warp_sources[aspect_key] = detected_source

@@ -44,8 +44,13 @@ def test_camera_template_hint_is_forwarded(monkeypatch) -> None:  # type: ignore
 
     received: dict[str, str | None] = {}
 
-    def fake_analyze(_data: bytes, template_hint: str | None = None) -> AnalyzeResponse:
+    def fake_analyze(
+        _data: bytes,
+        template_hint: str | None = None,
+        guided_capture: bool = False,
+    ) -> AnalyzeResponse:
         received["templateHint"] = template_hint
+        received["guidedCapture"] = str(guided_capture)
         return AnalyzeResponse(
             analysisId="test-hint",
             templateCode="HEALTHY_NUTRITION_V2",
@@ -60,10 +65,11 @@ def test_camera_template_hint_is_forwarded(monkeypatch) -> None:  # type: ignore
     monkeypatch.setattr(omr_api, "analyze_image_bytes", fake_analyze)
     response = client.post(
         "/api/omr/analyze",
-        data={"clientRequestId": "camera-test", "templateHint": "HEALTHY_NUTRITION"},
+        data={"clientRequestId": "camera-test", "templateHint": "HEALTHY_NUTRITION", "guidedCapture": "true"},
         files={"image": ("camera.jpg", b"jpeg", "image/jpeg")},
     )
 
     assert response.status_code == 200
     assert received["templateHint"] == "HEALTHY_NUTRITION"
+    assert received["guidedCapture"] == "True"
 
