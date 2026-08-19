@@ -153,6 +153,25 @@ describe("scanner page", () => {
     expect(screen.getByText("Soru 7")).toBeInTheDocument();
   });
 
+  test("keeps a healthy form with many uncertain answers editable", async () => {
+    const answers = cleanAnalysis().answers.map((answer, index) =>
+      index < 6 ? { ...answer, value: null, source: "UNRESOLVED", status: "AMBIGUOUS", confidence: 0.5 } : answer
+    );
+    mockFetchAnalysis(
+      cleanAnalysis({
+        templateCode: "HEALTHY_NUTRITION_V2",
+        status: "REVIEW_REQUIRED",
+        reviewRequiredCount: 6,
+        answers
+      })
+    );
+    render(<Page />);
+    await uploadImage();
+    expect(await screen.findByText("Manuel kontrol")).toBeInTheDocument();
+    expect(screen.getByText("Soru 1")).toBeInTheDocument();
+    expect(screen.getByText("Soru 6")).toBeInTheDocument();
+  });
+
   test.skip("shows blank confirmation", async () => {
     const answers = cleanAnalysis().answers.map((answer) =>
       answer.questionNo === 4 ? { ...answer, value: "BLANK", status: "BLANK" } : answer

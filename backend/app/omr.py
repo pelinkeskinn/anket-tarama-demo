@@ -83,8 +83,11 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
     blank_count = sum(1 for answer in answers if answer.status == "BLANK")
     form_confidence = _form_confidence(answers)
     status = "OK"
-    if review_required_count > MAX_MANUAL_REVIEW_QUESTIONS or (
-        blank_count > MAX_ACCEPTED_BLANK_ANSWERS and not is_healthy_template(template)
+    # The calibrated nutrition form can safely expose every unresolved answer
+    # for manual correction. Do not discard the entire scan merely because
+    # more than four hand-written marks need confirmation.
+    if not is_healthy_template(template) and (
+        review_required_count > MAX_MANUAL_REVIEW_QUESTIONS or blank_count > MAX_ACCEPTED_BLANK_ANSWERS
     ):
         status = "TOO_MANY_UNCERTAIN"
     elif review_required_count > 0:

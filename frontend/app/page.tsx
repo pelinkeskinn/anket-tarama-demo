@@ -3,7 +3,6 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://anket-tarama-backend.onrender.com").replace(/\/$/, "");
-const MAX_MANUAL_REVIEW_QUESTIONS = 4;
 const MAX_CAPTURE_SIDE = 2200;
 const CAMERA_JPEG_QUALITY = 0.86;
 const CAMERA_CHECK_INTERVAL_MS = 300;
@@ -324,7 +323,7 @@ export default function Page() {
     setAnalysis(payload);
     setFinalAnalysis(null);
     setManualSelections({});
-    if (payload.status === "TOO_MANY_UNCERTAIN" || payload.reviewRequiredCount > MAX_MANUAL_REVIEW_QUESTIONS) {
+    if (payload.status === "TOO_MANY_UNCERTAIN") {
       setError("Bu formda çok fazla cevap güvenilir biçimde okunamadı.\nFormu yeniden taratın.");
       setScreen("fatal");
       return;

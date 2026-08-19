@@ -177,6 +177,26 @@ def test_invalid_and_multiple_answers_require_review_in_full_analysis() -> None:
     assert answers[5].status == "MULTIPLE"
 
 
+def test_many_uncertain_healthy_answers_stay_available_for_manual_review() -> None:
+    template = healthy_template()
+    form = canonical_blank_form()
+
+    for question_no in range(1, 7):
+        question = template["questions"][question_no - 1]
+        for option in ("NEVER", "OFTEN"):
+            box = question["options"][option]
+            center = (int(box["x"]) + int(box["width"]) // 2, int(box["y"]) + int(box["height"]) // 2)
+            cv2.circle(form, center, 24, (60, 60, 60), -1)
+
+    success, encoded = cv2.imencode(".png", form)
+    assert success
+    response = analyze_image_bytes(encoded.tobytes())
+
+    assert response.templateCode == "HEALTHY_NUTRITION_V1"
+    assert response.reviewRequiredCount == 6
+    assert response.status == "REVIEW_REQUIRED"
+
+
 def test_template_similarity_validates_circle_grid_and_section_bands() -> None:
     template = healthy_template()
     assert template_match_score(canonical_blank_form(), template) >= 0.90
