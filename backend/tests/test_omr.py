@@ -86,6 +86,12 @@ def child_marked_image_bytes(style: str) -> bytes:
         elif style == "partial":
             draw.arc((center_x - 34, center_y - 34, center_x + 34, center_y + 34), start=205, end=515, fill="black", width=14)
             draw.line((center_x - 22, center_y + 15, center_x + 22, center_y - 15), fill="black", width=9)
+        elif style == "off_center_tick":
+            draw.line((center_x - 12, center_y + 15, center_x + 5, center_y + 31, center_x + 42, center_y - 24), fill="black", width=8)
+        elif style == "short_slash":
+            draw.line((center_x - 18, center_y + 16, center_x + 18, center_y - 16), fill="black", width=8)
+        elif style == "small_scribble":
+            draw.ellipse((center_x - 12, center_y - 8, center_x + 11, center_y + 14), fill="black")
         else:
             raise ValueError(style)
     output = BytesIO()
@@ -212,7 +218,7 @@ def test_faint_synthetic_marks_are_read_correctly() -> None:
     assert answer.value == "SOMETIMES"
 
 
-@pytest.mark.parametrize("style", ["tick", "x", "partial"])
+@pytest.mark.parametrize("style", ["tick", "x", "partial", "off_center_tick", "short_slash", "small_scribble"])
 def test_child_style_marks_are_read_correctly(style: str) -> None:
     expected = json.loads((ROOT / "sample-forms" / "expected-results.json").read_text(encoding="utf-8"))["filled-clean.png"]
     response = analyze_image_bytes(child_marked_image_bytes(style))

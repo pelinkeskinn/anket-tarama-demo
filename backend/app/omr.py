@@ -100,12 +100,22 @@ def _analyze_template(
     return template, answers, perspective_ms, omr_ms
 
 
-def _analysis_score(candidate: tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int]) -> tuple[float, int, int, int]:
+def _analysis_score(candidate: tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int]) -> tuple[float, float, float, float]:
     _, _, answers, _, _ = candidate
+    answer_count = max(len(answers), 1)
     ok_count = sum(1 for answer in answers if answer.status == "OK")
     review_required_count = sum(1 for answer in answers if answer.status in {"DOUBLE_MARK", "UNCERTAIN"})
     blank_count = sum(1 for answer in answers if answer.status == "BLANK")
-    return (_form_confidence(answers), ok_count, -review_required_count, -blank_count)
+    # Template/orientation selection must be driven by answers for which actual
+    # mark evidence was found.  A blank answer can legitimately have confidence
+    # 1.0, so putting form confidence first lets a wrong template full of
+    # "confident blanks" beat the correct template when marks are light or odd.
+    return (
+        ok_count / answer_count,
+        -review_required_count / answer_count,
+        -blank_count / answer_count,
+        _form_confidence(answers),
+    )
 
 
 def _needs_robust_read(answers: list[AnswerResult]) -> bool:
@@ -686,6 +696,16 @@ def _mark_density(gray: np.ndarray, box: dict[str, int]) -> float:
     darkness = (255.0 - center.astype(np.float32)) / 255.0
     normalized = np.clip((darkness - background_darkness) / max(1.0 - background_darkness, 0.01), 0, 1)
     dark_pixel_ratio = float(np.mean(normalized > 0.10))
+    # A child may use a tick, a short slash or a small scribble instead of
+    # filling the whole bubble.  Their total ink coverage is low, but the ink
+    # still forms one meaningful stroke.  Reward that connected stroke while
+    # leaving isolated paper/compression noise almost unchanged.
+    ink_mask = (normalized > 0.16).astype(np.uint8)
+    component_count, _, component_stats, _ = cv2.connectedComponentsWithStats(ink_mask, connectivity=8)
+    largest_component_ratio = 0.0
+    if component_count > 1:
+        largest_component_ratio = float(np.max(component_stats[1:, cv2.CC_STAT_AREA])) / float(center.size)
+    stroke_evidence = min(1.0, float(np.sqrt(largest_component_ratio / 0.12)))
     darkest_pixels = np.sort(normalized.reshape(-1))[int(normalized.size * 0.8) :]
     darkest_mean = float(np.mean(darkest_pixels)) if darkest_pixels.size else 0.0
 
@@ -695,7 +715,7 @@ def _mark_density(gray: np.ndarray, box: dict[str, int]) -> float:
     threshold = max(12.0, float(np.median(background_float)) - 22.0)
     locally_dark_ratio = float(np.mean(center_float < threshold))
 
-    score = dark_pixel_ratio * 0.42 + darkest_mean * 0.34 + local_delta * 0.14 + locally_dark_ratio * 0.10
+    score = dark_pixel_ratio * 0.36 + darkest_mean * 0.29 + local_delta * 0.12 + locally_dark_ratio * 0.08 + stroke_evidence * 0.15
     return round(float(np.clip(score, 0, 1)), 4)
 
 
