@@ -54,6 +54,7 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
     oriented_images = [image] if is_pdf else _orientation_candidates(image)
     for oriented_image in oriented_images:
         warp_sources: dict[float, tuple[np.ndarray, bool]] = {}
+        matched_healthy_template = False
         for template in templates:
             try:
                 aspect_key = round(float(template["pageWidth"]) / float(template["pageHeight"]), 4)
@@ -61,10 +62,18 @@ def analyze_image_bytes(image_bytes: bytes) -> AnalyzeResponse:
                     warp_sources[aspect_key] = _find_warp_source(oriented_image, template)
                 template_result, answers, perspective_ms, omr_ms = _analyze_template(oriented_image, template, warp_sources[aspect_key])
                 candidates.append((oriented_image, template_result, answers, perspective_ms, omr_ms))
+                if is_healthy_template(template_result) and float(template_result.get("_matchScore", 0.0)) >= 0.72:
+                    matched_healthy_template = True
+                    break
             except OmrError as exc:
                 saw_invalid_template = saw_invalid_template or exc.code == "INVALID_TEMPLATE"
                 if exc.code not in {"MARKERS_NOT_FOUND", "ALIGNMENT_FAILED", "INVALID_TEMPLATE"}:
                     raise
+        # A calibrated circle-grid match is stronger evidence than results from
+        # unrelated generic templates. Once found, avoid three more rotations
+        # and the remaining template passes.
+        if matched_healthy_template:
+            break
     if not candidates:
         raise OmrError("INVALID_TEMPLATE" if saw_invalid_template else "ALIGNMENT_FAILED")
     selected_image, template, answers, perspective_ms, omr_ms = max(candidates, key=_analysis_score)

@@ -1,6 +1,7 @@
 backend/.venv/
 backend/.venv313/
 backend/.pytest_cache/
+backend/.pytest-tmp-*/
 backend/server.log
 backend/server.err.log
 backend/data/demo.db

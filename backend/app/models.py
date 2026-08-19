@@ -30,6 +30,7 @@ class AnswerResult(BaseModel):
     section: int | None = Field(default=None, ge=1, le=2)
     selectedIndex: int | None = Field(default=None, ge=0, le=3)
     selectedLabel: str | None = None
+    optionLabels: list[str] | None = Field(default=None, min_length=1, max_length=4)
     scores: list[float] | None = Field(default=None, min_length=4, max_length=4)
 
 

@@ -143,7 +143,16 @@ describe("scanner page", () => {
       status: "REVIEW_REQUIRED",
       reviewRequiredCount: 1,
       answers: cleanAnalysis().answers.map((answer) =>
-        answer.questionNo === 7 ? { ...answer, value: null, source: "UNRESOLVED", status: "DOUBLE_MARK", confidence: 0.55 } : answer
+        answer.questionNo === 7
+          ? {
+              ...answer,
+              value: null,
+              source: "UNRESOLVED",
+              status: "DOUBLE_MARK",
+              confidence: 0.55,
+              optionLabels: ["Form seçeneği 1", "Form seçeneği 2", "Form seçeneği 3", "Form seçeneği 4"]
+            }
+          : answer
       )
     });
     mockFetchAnalysis(payload);
@@ -151,6 +160,7 @@ describe("scanner page", () => {
     await uploadImage();
     expect(await screen.findByText("Manuel kontrol")).toBeInTheDocument();
     expect(screen.getByText("Soru 7")).toBeInTheDocument();
+    expect(screen.getByText("Form seçeneği 2")).toBeInTheDocument();
   });
 
   test("keeps a healthy form with many uncertain answers editable", async () => {

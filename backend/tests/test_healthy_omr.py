@@ -94,6 +94,14 @@ def test_revised_reference_geometry_contains_104_rois() -> None:
     assert [question["section"] for question in template["questions"][11:]] == [2] * 15
 
 
+def test_answers_expose_labels_from_the_matched_form_template() -> None:
+    template = healthy_template("HEALTHY_NUTRITION_V2")
+    answers = read_answers(cv2.cvtColor(canonical_blank_form(template), cv2.COLOR_BGR2GRAY), template)
+
+    assert answers[0].optionLabels == ["Hiçbir Zaman", "Ara Sıra", "Sık Sık", "Her Zaman"]
+    assert answers[11].optionLabels == ["Hiçbir Zaman", "1-2 Kez/Hafta", "3-4 Kez/Hafta", "5+ Kez/Hafta"]
+
+
 def test_circle_grid_selects_the_correct_pdf_revision() -> None:
     original = healthy_template("HEALTHY_NUTRITION_V1")
     revised = healthy_template("HEALTHY_NUTRITION_V2")

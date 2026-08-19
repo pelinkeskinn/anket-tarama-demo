@@ -134,6 +134,7 @@ def evaluate_question(question: dict[str, Any], features: list[FillFeatures]) ->
         "questionNo": question_no,
         "section": section,
         "scores": scores,
+        "optionLabels": [str(question["optionLabels"][option]) for option in OPTION_ORDER],
     }
     if len(filled) >= 2:
         confidence = min(0.99, 0.72 + min(scores[index] for index in filled) * 0.25)

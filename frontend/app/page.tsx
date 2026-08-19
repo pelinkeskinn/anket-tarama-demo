@@ -23,6 +23,7 @@ type Answer = {
   section?: number | null;
   selectedIndex?: number | null;
   selectedLabel?: string | null;
+  optionLabels?: string[] | null;
   scores?: number[] | null;
 };
 
@@ -363,7 +364,7 @@ export default function Page() {
           status: value === "BLANK" ? "BLANK" : analysis.templateCode.startsWith("HEALTHY_NUTRITION_V") ? "MARKED" : "OK",
           source: "MANUAL",
           confidence: 1,
-          manualCorrection: answerOptionLabel(analysis.templateCode, answer.questionNo, value)
+          manualCorrection: answerOptionLabelForAnswer(analysis.templateCode, answer, value)
         };
       })
     };
@@ -638,7 +639,7 @@ function ManualReview({
                 className={`option-button ${selections[answer.questionNo] === value ? "selected" : ""}`}
                 onClick={() => onSelect(answer.questionNo, value)}
               >
-                {value === "BLANK" ? "Boş bırak" : answerOptionLabel(templateCode, answer.questionNo, value)}
+                {value === "BLANK" ? "Boş bırak" : answerOptionLabelForAnswer(templateCode, answer, value)}
               </button>
             ))}
           </div>
@@ -771,7 +772,7 @@ function AnswerList({ templateCode, answers, showConfidence = false }: { templat
       {answers.map((answer) => (
         <div className="answer-row" key={answer.questionNo}>
           <strong>{answer.questionNo}.</strong>
-          <span>{answer.value ? answerOptionLabel(templateCode, answer.questionNo, answer.value) : labels[answer.status]}</span>
+          <span>{answer.value ? answerOptionLabelForAnswer(templateCode, answer, answer.value) : labels[answer.status]}</span>
           <span className="badge">{answer.source === "MANUAL" ? "Manuel seçildi" : answer.source}</span>
           {showConfidence && <span className="muted">Güven: %{Math.round(answer.confidence * 100)}</span>}
           {answer.manualCorrection && <span className="muted">Düzeltme: {answer.manualCorrection}</span>}
@@ -819,6 +820,12 @@ function answerOptionLabel(templateCode: string, questionNo: number, value: Answ
   }
   if (!templateCode.startsWith("HEALTHY_NUTRITION_V")) return labels[value];
   return ({ NEVER: "Hiçbir zaman", SOMETIMES: "Ara sıra", OFTEN: "Sık sık", ALWAYS: "Her zaman" } as const)[value];
+}
+
+function answerOptionLabelForAnswer(templateCode: string, answer: Answer, value: AnswerValue): string {
+  if (value === "BLANK") return labels.BLANK;
+  const index = (["NEVER", "SOMETIMES", "OFTEN", "ALWAYS"] as const).indexOf(value);
+  return answer.optionLabels?.[index] ?? answerOptionLabel(templateCode, answer.questionNo, value);
 }
 
 function isReviewStatus(status: AnswerStatus): boolean {
