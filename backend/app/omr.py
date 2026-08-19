@@ -46,8 +46,10 @@ def analyze_image_bytes(image_bytes: bytes, template_hint: str | None = None) ->
     candidates: list[tuple[np.ndarray, dict[str, Any], list[AnswerResult], int, int, tuple[np.ndarray, bool]]] = []
     saw_invalid_template = False
     templates = load_templates()
-    if is_pdf or template_hint == "HEALTHY_NUTRITION":
+    is_guided_nutrition_scan = template_hint == "HEALTHY_NUTRITION"
+    if is_pdf or is_guided_nutrition_scan:
         templates = [template for template in templates if is_healthy_template(template)]
+    healthy_match_threshold = 0.30 if is_guided_nutrition_scan else 0.68
     # PDF pages are rasterized by their page coordinate system and are already
     # upright. Trying four rotations multiplies Render CPU time and can push a
     # valid request beyond the reverse proxy timeout.
@@ -62,7 +64,7 @@ def analyze_image_bytes(image_bytes: bytes, template_hint: str | None = None) ->
                     warp_sources[aspect_key] = _pdf_page_corners(oriented_image) if is_pdf else _find_warp_source(oriented_image, template)
                 try:
                     template_result, answers, perspective_ms, omr_ms = _analyze_template(
-                        oriented_image, template, warp_sources[aspect_key]
+                        oriented_image, template, warp_sources[aspect_key], healthy_match_threshold
                     )
                 except OmrError as exc:
                     # A PDF page normally already is the normalized sheet. If
@@ -73,7 +75,7 @@ def analyze_image_bytes(image_bytes: bytes, template_hint: str | None = None) ->
                     detected_source = _find_warp_source(oriented_image, template)
                     warp_sources[aspect_key] = detected_source
                     template_result, answers, perspective_ms, omr_ms = _analyze_template(
-                        oriented_image, template, detected_source
+                        oriented_image, template, detected_source, healthy_match_threshold
                     )
                 candidates.append((oriented_image, template_result, answers, perspective_ms, omr_ms, warp_sources[aspect_key]))
                 if is_healthy_template(template_result) and float(template_result.get("_matchScore", 0.0)) >= 0.72:
@@ -140,6 +142,7 @@ def _analyze_template(
     image: np.ndarray,
     template: dict[str, Any],
     warp_source: tuple[np.ndarray, bool] | None = None,
+    healthy_match_threshold: float = 0.68,
 ) -> tuple[dict[str, Any], list[AnswerResult], int, int]:
     reading_template = _scaled_template(template, ANALYSIS_SCALE)
     perspective_start = time.perf_counter()
@@ -150,7 +153,7 @@ def _analyze_template(
     template_result = template
     if is_healthy_template(reading_template):
         match_score = template_match_score(warped, reading_template)
-        if match_score < 0.68:
+        if match_score < healthy_match_threshold:
             raise OmrError("INVALID_TEMPLATE")
         template_result = {**template, "_matchScore": match_score}
     answers = _read_answers(warped, reading_template)

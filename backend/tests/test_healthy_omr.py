@@ -138,6 +138,25 @@ def test_nutrition_template_hint_skips_unrelated_templates(monkeypatch: pytest.M
     assert "UNRELATED_FORM" not in analyzed_codes
 
 
+def test_guided_camera_scan_accepts_degraded_but_aligned_grid(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.omr as omr_module
+
+    template = healthy_template("HEALTHY_NUTRITION_V2")
+    form = canonical_blank_form(template)
+    page_corners = omr_module._pdf_page_corners(form)
+    monkeypatch.setattr(omr_module, "template_match_score", lambda _warped, _template: 0.35)
+
+    with pytest.raises(OmrError) as strict_error:
+        omr_module._analyze_template(form, template, page_corners)
+    assert strict_error.value.code == "INVALID_TEMPLATE"
+
+    matched_template, answers, _, _ = omr_module._analyze_template(
+        form, template, page_corners, healthy_match_threshold=0.30
+    )
+    assert matched_template["_matchScore"] == 0.35
+    assert len(answers) == 26
+
+
 @pytest.mark.parametrize(
     ("style", "expected_status"),
     [
