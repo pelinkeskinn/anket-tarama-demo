@@ -2,11 +2,13 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { guideCaptureRegion } from "./camera";
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://anket-tarama-backend.onrender.com").replace(/\/$/, "");
-const MAX_CAPTURE_SIDE = 2200;
-const CAMERA_JPEG_QUALITY = 0.86;
-const CAMERA_CHECK_INTERVAL_MS = 300;
-const REQUIRED_STABLE_FRAMES = 3;
+const MAX_CAPTURE_SIDE = 2600;
+const CAMERA_JPEG_QUALITY = 0.94;
+const CAMERA_CHECK_INTERVAL_MS = 220;
+const REQUIRED_STABLE_FRAMES = 2;
 
 type AnswerValue = "NEVER" | "SOMETIMES" | "OFTEN" | "ALWAYS" | "BLANK";
 type AnswerStatus = "OK" | "BLANK" | "DOUBLE_MARK" | "UNCERTAIN" | "MARKED" | "MULTIPLE" | "INVALID" | "AMBIGUOUS";
@@ -81,6 +83,7 @@ const demoForms = [
 
 export default function Page() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const submittingRef = useRef(false);
   const autoCaptureRef = useRef(false);
@@ -134,27 +137,27 @@ export default function Page() {
       if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || submittingRef.current || autoCaptureRef.current) {
         return;
       }
-      const check = inspectCameraFrame(video, previousFrameRef.current);
+      const check = inspectCameraFrame(video, frameRef.current, previousFrameRef.current);
       previousFrameRef.current = check.frame;
-      if (check.brightness < 55) {
+      if (check.brightness < 45) {
         stableFramesRef.current = 0;
         setQuality("bad");
         setGuidance("Ortam çok karanlık — ışığı artırın");
         return;
       }
-      if (check.paperRatio < 0.12) {
+      if (check.paperRatio < 0.28) {
         stableFramesRef.current = 0;
         setQuality("bad");
         setGuidance("Formun tamamını çerçevenin içine alın");
         return;
       }
-      if (check.sharpness < 7) {
+      if (check.sharpness < 3.2) {
         stableFramesRef.current = 0;
         setQuality("warn");
         setGuidance("Görüntü net değil — kamerayı sabit tutun");
         return;
       }
-      if (check.motion > 8) {
+      if (check.motion > 12) {
         stableFramesRef.current = 0;
         setQuality("warn");
         setGuidance("Telefonu sabit tutun");
@@ -196,7 +199,12 @@ export default function Page() {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 2560 },
+          height: { ideal: 1920 },
+          aspectRatio: { ideal: 4 / 3 }
+        },
         audio: false
       });
       streamRef.current = stream;
@@ -236,7 +244,7 @@ export default function Page() {
       return;
     }
     const video = videoRef.current;
-    const capture = fullCameraFrame(video);
+    const capture = guideCaptureRegion(video, frameRef.current);
     const scale = Math.min(1, MAX_CAPTURE_SIDE / Math.max(capture.width, capture.height));
     const canvas = document.createElement("canvas");
     canvas.width = capture.width;
@@ -244,6 +252,10 @@ export default function Page() {
     canvas.width = Math.max(1, Math.round(capture.width * scale));
     canvas.height = Math.max(1, Math.round(capture.height * scale));
     const context = canvas.getContext("2d");
+    if (context) {
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+    }
     context?.drawImage(video, capture.x, capture.y, capture.width, capture.height, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", CAMERA_JPEG_QUALITY));
     if (blob) {
@@ -481,7 +493,7 @@ export default function Page() {
             ) : (
               <CameraFallback state={cameraState} onRequest={requestCamera} />
             )}
-            <div className={`frame ${quality}`} aria-label="A4 hizalama çerçevesi">
+            <div ref={frameRef} className={`frame ${quality}`} aria-label="A4 hizalama çerçevesi">
               <span className="corner tl" />
               <span className="corner tr" />
               <span className="corner br" />
@@ -832,13 +844,11 @@ function isReviewStatus(status: AnswerStatus): boolean {
   return status === "DOUBLE_MARK" || status === "UNCERTAIN" || status === "MULTIPLE" || status === "INVALID" || status === "AMBIGUOUS";
 }
 
-function fullCameraFrame(video: HTMLVideoElement) {
-  const videoWidth = video.videoWidth || 1920;
-  const videoHeight = video.videoHeight || 1080;
-  return { x: 0, y: 0, width: videoWidth, height: videoHeight };
-}
-
-function inspectCameraFrame(video: HTMLVideoElement, previous: Uint8ClampedArray | null) {
+function inspectCameraFrame(
+  video: HTMLVideoElement,
+  guide: HTMLElement | null,
+  previous: Uint8ClampedArray | null
+) {
   const width = 160;
   const height = 120;
   const canvas = document.createElement("canvas");
@@ -848,7 +858,8 @@ function inspectCameraFrame(video: HTMLVideoElement, previous: Uint8ClampedArray
   if (!context) {
     return { brightness: 0, paperRatio: 0, sharpness: 0, motion: 100, frame: new Uint8ClampedArray() };
   }
-  context.drawImage(video, 0, 0, width, height);
+  const capture = guideCaptureRegion(video, guide);
+  context.drawImage(video, capture.x, capture.y, capture.width, capture.height, 0, 0, width, height);
   const rgba = context.getImageData(0, 0, width, height).data;
   const frame = new Uint8ClampedArray(width * height);
   let brightnessTotal = 0;
