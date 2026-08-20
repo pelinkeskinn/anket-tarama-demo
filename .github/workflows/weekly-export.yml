@@ -1,0 +1,43 @@
+name: weekly-survey-export
+
+# Draft: weekly Excel backup of survey records.
+# Required repository secrets:
+#   BACKEND_URL     e.g. https://anket-tarama-backend.onrender.com
+#   ADMIN_TOKEN     same value as the backend ADMIN_TOKEN env var
+# Optional:
+#   EXPORT_UPLOAD_URL  HTTP endpoint that accepts the xlsx (S3 presign, Drive, e-mail gateway)
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download numeric Excel export
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -H "X-Admin-Token: ${ADMIN_TOKEN}" \
+            "${BACKEND_URL%/}/api/forms/export.xlsx?format=numeric" \
+            -o anket-kayitlari.xlsx
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anket-kayitlari
+          path: anket-kayitlari.xlsx
+          retention-days: 90
+      - name: Optional remote copy
+        env:
+          EXPORT_UPLOAD_URL: ${{ secrets.EXPORT_UPLOAD_URL }}
+        run: |
+          if [ -z "${EXPORT_UPLOAD_URL}" ]; then
+            echo "EXPORT_UPLOAD_URL secret not set; skipping remote copy"
+            exit 0
+          fi
+          curl -fsSL -X PUT --upload-file anket-kayitlari.xlsx "$EXPORT_UPLOAD_URL"

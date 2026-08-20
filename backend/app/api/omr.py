@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, File, Form, UploadFile
+from fastapi.concurrency import run_in_threadpool
 
 from app.config import MAX_UPLOAD_BYTES
 from app.errors import OmrError, http_error
@@ -28,7 +29,7 @@ async def analyze(
         raise http_error("INVALID_FILE", status_code=413)
 
     try:
-        return analyze_image_bytes(data, template_hint=templateHint, guided_capture=guidedCapture)
+        return await run_in_threadpool(analyze_image_bytes, data, templateHint, guidedCapture)
     except OmrError as exc:
         raise http_error(exc.code) from exc
     except Exception as exc:

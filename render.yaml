@@ -6,7 +6,7 @@ services:
     plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
@@ -21,6 +21,9 @@ services:
         sync: false
       - key: MAX_MANUAL_REVIEW_QUESTIONS
         value: 4
+      - key: ADMIN_TOKEN
+        sync: false
+      # Do not set OMR_DEBUG_ENABLED in production; debug images consume disk.
 
   - type: web
     name: anket-tarama-frontend

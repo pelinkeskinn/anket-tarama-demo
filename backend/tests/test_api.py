@@ -17,6 +17,20 @@ def test_health_endpoint() -> None:
     assert response.headers["x-request-id"]
 
 
+def test_production_closes_openapi(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("APP_ENV", "production")
+    from app.config import get_settings
+    from app.main import create_app
+
+    get_settings.cache_clear()
+    try:
+        production_client = TestClient(create_app())
+        assert production_client.get("/openapi.json").status_code == 404
+        assert production_client.get("/docs").status_code == 404
+    finally:
+        get_settings.cache_clear()
+
+
 def test_readiness_checks_database() -> None:
     response = client.get("/readyz")
     assert response.status_code == 200

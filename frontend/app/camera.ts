@@ -1,5 +1,12 @@
 export type CaptureRegion = { x: number; y: number; width: number; height: number };
 
+export const MAX_CAPTURE_SIDE = 2000;
+export const CAMERA_JPEG_QUALITY = 0.8;
+
+export function captureScale(width: number, height: number, maxSide = MAX_CAPTURE_SIDE): number {
+  return Math.min(1, maxSide / Math.max(width, height, 1));
+}
+
 export function fullCameraFrame(video: HTMLVideoElement): CaptureRegion {
   const videoWidth = video.videoWidth || 1920;
   const videoHeight = video.videoHeight || 1080;

@@ -397,7 +397,21 @@ button:disabled {
   }
 }
 
-.history-table-wrap {
+.export-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.cold-start-note {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  color: #d7e1e6;
+  font-size: 12px;
+  text-align: center;
+  text-shadow: 0 1px 2px #000;
+}
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 8px;

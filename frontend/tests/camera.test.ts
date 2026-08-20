@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { fullCameraFrame, guideCaptureRegion } from "../app/camera";
+import { captureScale, fullCameraFrame, guideCaptureRegion } from "../app/camera";
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) } as DOMRect;
@@ -21,6 +21,11 @@ describe("camera capture region", () => {
     expect(region.width).toBeLessThan(video.videoWidth);
     expect(region.height).toBeGreaterThan(video.videoHeight * 0.65);
     expect(region.x).toBeGreaterThan(0);
+  });
+
+  test("limits capture scale to a 2000px long side", () => {
+    expect(captureScale(4000, 3000)).toBeCloseTo(0.5);
+    expect(captureScale(800, 600)).toBe(1);
   });
 
   test("falls back to the full frame before layout is available", () => {

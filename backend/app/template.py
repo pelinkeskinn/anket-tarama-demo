@@ -182,3 +182,11 @@ def _kizilay_survey_v1_template() -> dict[str, Any]:
         "questions": questions,
     }
 
+
+def expected_question_count(template_code: str) -> int | None:
+    for template in load_templates():
+        if template.get("templateCode") == template_code:
+            questions = template.get("questions") or []
+            return int(template.get("questionCount") or len(questions))
+    return None
+

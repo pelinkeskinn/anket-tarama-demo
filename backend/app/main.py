@@ -32,6 +32,7 @@ def create_app() -> FastAPI:
         version="1.0.0",
         docs_url="/docs" if settings.environment != "production" else None,
         redoc_url=None,
+        openapi_url="/openapi.json" if settings.environment != "production" else None,
         lifespan=lifespan,
     )
     application.add_middleware(
@@ -40,7 +41,7 @@ def create_app() -> FastAPI:
         allow_origin_regex=settings.cors_origin_regex,
         allow_credentials=False,
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Accept", "Content-Type", "Authorization", "X-Request-ID"],
+        allow_headers=["Accept", "Content-Type", "Authorization", "X-Request-ID", "X-Admin-Token"],
     )
 
     @application.middleware("http")

@@ -2,13 +2,14 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
-import { fullCameraFrame, guideCaptureRegion, type CaptureRegion } from "./camera";
+import { CAMERA_JPEG_QUALITY, captureScale, fullCameraFrame, guideCaptureRegion, type CaptureRegion } from "./camera";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://anket-tarama-backend.onrender.com").replace(/\/$/, "");
-const MAX_CAPTURE_SIDE = 2600;
-const CAMERA_JPEG_QUALITY = 0.94;
+const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN ?? "";
 const CAMERA_CHECK_INTERVAL_MS = 220;
 const REQUIRED_STABLE_FRAMES = 2;
+const ANALYZE_TIMEOUT_MS = 45000;
+const HISTORY_PAGE_SIZE = 50;
 
 type AnswerValue = "NEVER" | "SOMETIMES" | "OFTEN" | "ALWAYS" | "BLANK";
 type AnswerStatus = "OK" | "BLANK" | "DOUBLE_MARK" | "UNCERTAIN" | "MARKED" | "MULTIPLE" | "INVALID" | "AMBIGUOUS";
@@ -29,6 +30,12 @@ type Answer = {
   scores?: number[] | null;
 };
 
+type ProcessingStats = {
+  totalMs: number;
+  perspectiveMs: number;
+  omrMs: number;
+};
+
 type Analysis = {
   analysisId: string;
   templateCode: string;
@@ -37,6 +44,7 @@ type Analysis = {
   blankCount: number;
   reviewRequiredCount: number;
   answers: Answer[];
+  processing?: ProcessingStats;
 };
 
 type StoredSummary = {
@@ -45,6 +53,7 @@ type StoredSummary = {
   formConfidence: number;
   blankCount: number;
   manualCount: number;
+  possibleDuplicate?: boolean;
 };
 
 type StoredDetail = StoredSummary & {
@@ -103,6 +112,9 @@ export default function Page() {
   const [error, setError] = useState("");
   const [demoName, setDemoName] = useState<string>(demoForms[0][0]);
   const [history, setHistory] = useState<StoredSummary[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [detail, setDetail] = useState<StoredDetail | null>(null);
   const [pendingDuplicate, setPendingDuplicate] = useState<Analysis | null>(null);
 
@@ -259,7 +271,7 @@ export default function Page() {
   }
 
   async function cameraFrameBlob(video: HTMLVideoElement, capture: CaptureRegion) {
-    const scale = Math.min(1, MAX_CAPTURE_SIDE / Math.max(capture.width, capture.height));
+    const scale = captureScale(capture.width, capture.height);
     const canvas = document.createElement("canvas");
     canvas.width = capture.width;
     canvas.height = capture.height;
@@ -289,11 +301,30 @@ export default function Page() {
     setError("");
     setScreen("processing");
     setProcessingText("Fotoğraf alındı.\nKağıdı kaldırabilirsiniz.");
-    const slowTimer = window.setTimeout(() => setProcessingText("İşlem beklenenden uzun sürüyor."), 9000);
-    const processingTimer = window.setTimeout(() => setProcessingText("Form işleniyor..."), 700);
+    let timedOut = false;
+    const timeoutTimer = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, ANALYZE_TIMEOUT_MS);
+    const stageTimers = [
+      window.setTimeout(() => {
+        if (isCurrentAnalyzeRequest(requestId)) setProcessingText("Görüntü yükleniyor…");
+      }, 400),
+      window.setTimeout(() => {
+        if (isCurrentAnalyzeRequest(requestId)) setProcessingText("Kenar/işaretçi tespiti…");
+      }, 1600),
+      window.setTimeout(() => {
+        if (isCurrentAnalyzeRequest(requestId)) setProcessingText("Cevaplar okunuyor…");
+      }, 3200)
+    ];
 
     try {
-      await warmBackend();
+      await warmBackend(controller.signal, (message) => {
+        if (isCurrentAnalyzeRequest(requestId)) setProcessingText(message);
+      });
+      if (!isCurrentAnalyzeRequest(requestId)) {
+        return;
+      }
       const postAnalysis = async (candidate: Blob, guidedCapture = false) => {
         const body = new FormData();
         body.append("image", candidate, candidate.type === "application/pdf" ? "scan.pdf" : "scan.jpg");
@@ -324,14 +355,17 @@ export default function Page() {
       }
       handleAnalysis(payload);
     } catch (err) {
-      if (controller.signal.aborted || !isCurrentAnalyzeRequest(requestId)) {
+      if (!isCurrentAnalyzeRequest(requestId) && !timedOut) {
         return;
       }
-      setError(readClientError(err));
+      if (controller.signal.aborted && !timedOut) {
+        return;
+      }
+      setError(timedOut || isTimeoutError(err) ? "Sunucu yanıt vermiyor, tekrar deneyin" : readClientError(err));
       setScreen("fatal");
     } finally {
-      window.clearTimeout(slowTimer);
-      window.clearTimeout(processingTimer);
+      window.clearTimeout(timeoutTimer);
+      stageTimers.forEach((timer) => window.clearTimeout(timer));
       if (activeAnalyzeRef.current?.id === requestId) {
         activeAnalyzeRef.current = null;
         submittingRef.current = false;
@@ -339,12 +373,32 @@ export default function Page() {
     }
   }
 
-  async function warmBackend() {
-    try {
-      await fetch(`${API_BASE}/healthz`, { cache: "no-store" });
-    } catch {
-      // The analyze request below will show the real error if the backend is still unreachable.
+  async function warmBackend(signal: AbortSignal, onStatus: (message: string) => void) {
+    const deadline = Date.now() + 25000;
+    let delay = 1000;
+    let firstAttempt = true;
+    while (Date.now() <= deadline) {
+      if (signal.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      try {
+        const response = await fetch(`${API_BASE}/healthz`, { cache: "no-store", signal });
+        if (response.ok || ![502, 503, 504].includes(response.status)) {
+          return;
+        }
+      } catch (err) {
+        if (signal.aborted) {
+          throw err;
+        }
+      }
+      if (firstAttempt) {
+        onStatus("Sunucu uyandırılıyor, birkaç saniye sürebilir…\nÜcretsiz sunucu planı nedeniyle ilk tarama daha uzun sürebilir.");
+        firstAttempt = false;
+      }
+      await sleep(Math.min(delay, deadline - Date.now()), signal);
+      delay = Math.min(delay * 2, 8000);
     }
+    throw new Error("Sunucu yanıt vermiyor, tekrar deneyin");
   }
 
   function isCurrentAnalyzeRequest(requestId: number) {
@@ -427,7 +481,7 @@ export default function Page() {
   async function saveAndShowSuccess(payload: Analysis) {
     const response = await fetch(`${API_BASE}/api/forms`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...adminHeaders() },
       body: JSON.stringify({
         analysisId: payload.analysisId,
         templateCode: payload.templateCode,
@@ -476,14 +530,32 @@ export default function Page() {
     }
   }
 
-  async function loadHistory() {
-    const response = await fetch(`${API_BASE}/api/forms`);
-    setHistory(response.ok ? ((await response.json()) as StoredSummary[]) : []);
+  async function loadHistory(reset = true) {
+    setHistoryLoading(true);
+    const offset = reset ? 0 : history.length;
+    const response = await fetch(`${API_BASE}/api/forms?limit=${HISTORY_PAGE_SIZE}&offset=${offset}`, {
+      headers: adminHeaders()
+    });
+    if (!response.ok) {
+      if (reset) {
+        setHistory([]);
+        setHistoryTotal(0);
+        setScreen("history");
+      }
+      setHistoryLoading(false);
+      return;
+    }
+    const payload = (await response.json()) as StoredSummary[] | { items: StoredSummary[]; total: number };
+    const items = Array.isArray(payload) ? payload : payload.items;
+    const total = Array.isArray(payload) ? payload.length : payload.total;
+    setHistory(reset ? items : [...history, ...items]);
+    setHistoryTotal(total);
     setScreen("history");
+    setHistoryLoading(false);
   }
 
   async function openDetail(id: number) {
-    const response = await fetch(`${API_BASE}/api/forms/${id}`);
+    const response = await fetch(`${API_BASE}/api/forms/${id}`, { headers: adminHeaders() });
     if (response.ok) {
       setDetail((await response.json()) as StoredDetail);
       setScreen("detail");
@@ -491,26 +563,55 @@ export default function Page() {
   }
 
   async function deleteDetail(id: number) {
-    await fetch(`${API_BASE}/api/forms/${id}`, { method: "DELETE" });
+    await fetch(`${API_BASE}/api/forms/${id}`, { method: "DELETE", headers: adminHeaders() });
     setDetail(null);
-    await loadHistory();
+    await loadHistory(true);
   }
 
-  function exportExcel() {
-    window.location.href = `${API_BASE}/api/forms/export.xlsx`;
+  async function exportExcel(format: "numeric" | "text" = "numeric") {
+    setExporting(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/forms/export.xlsx?format=${format}`, { headers: adminHeaders() });
+      if (!response.ok) {
+        throw new Error("Excel hazırlanamadı.");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = format === "text" ? "anket-kayitlari-metin.xlsx" : "anket-kayitlari.xlsx";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Excel hazırlanamadı.");
+    } finally {
+      setExporting(false);
+    }
   }
 
   if (screen === "history") {
-    return <HistoryScreen scannedCount={scannedCount} forms={history} onBack={() => setScreen("scanner")} onOpen={openDetail} onExport={exportExcel} />;
+    return (
+      <HistoryScreen
+        scannedCount={scannedCount}
+        forms={history}
+        total={historyTotal}
+        loading={historyLoading}
+        exporting={exporting}
+        onBack={() => setScreen("scanner")}
+        onOpen={openDetail}
+        onExport={exportExcel}
+        onLoadMore={() => void loadHistory(false)}
+      />
+    );
   }
 
   if (screen === "detail" && detail) {
-    return <DetailScreen scannedCount={scannedCount} detail={detail} onBack={loadHistory} onDelete={deleteDetail} />;
+    return <DetailScreen scannedCount={scannedCount} detail={detail} onBack={() => void loadHistory(true)} onDelete={deleteDetail} />;
   }
 
   return (
     <main className="app">
-      <Header scannedCount={scannedCount} onHistory={loadHistory} />
+      <Header scannedCount={scannedCount} onHistory={() => void loadHistory(true)} />
       {screen === "scanner" && (
         <section className="scan">
           <div className="camera-shell">
@@ -526,6 +627,7 @@ export default function Page() {
               <span className="corner bl" />
             </div>
             <div className="guidance">{cameraState === "ready" ? guidance : "Forma dokunarak odaklayın"}</div>
+            <div className="cold-start-note">Ücretsiz sunucu planı nedeniyle ilk tarama daha uzun sürebilir.</div>
           </div>
 
           <div className="actions">
@@ -557,7 +659,9 @@ export default function Page() {
         </section>
       )}
 
-      {screen === "processing" && <StatusScreen title={processingText} button={processingText.includes("uzun") ? "Tekrar Dene" : undefined} onClick={cancelAnalyzeAndReturnToScanner} />}
+      {screen === "processing" && (
+        <StatusScreen title={processingText} button="Tekrar Dene" onClick={cancelAnalyzeAndReturnToScanner} />
+      )}
 
       {screen === "manual" && analysis && (
         <ManualReview templateCode={analysis.templateCode} answers={reviewAnswers} selections={manualSelections} onSelect={chooseManual} onContinue={continueManual} />
@@ -732,6 +836,7 @@ function SuccessScreen({ analysis, onNext }: { analysis: Analysis; onNext: () =>
   const manualCount = analysis.answers.filter((answer) => answer.source === "MANUAL").length;
   const autoCount = analysis.answers.filter((answer) => answer.source === "AUTO").length;
   const blankCount = analysis.answers.filter((answer) => answer.value === "BLANK").length;
+  const elapsed = analysis.processing ? (analysis.processing.totalMs / 1000).toFixed(1) : null;
   return (
     <section className="screen">
       <div className="panel success stack">
@@ -740,6 +845,7 @@ function SuccessScreen({ analysis, onNext }: { analysis: Analysis; onNext: () =>
         <div>Otomatik okunan soru sayısı: {autoCount}</div>
         <div>Manuel düzeltilen soru sayısı: {manualCount}</div>
         <div>Boş cevap sayısı: {blankCount}</div>
+        {elapsed && <div>{elapsed} sn'de tamamlandı</div>}
       </div>
       <AnswerList templateCode={analysis.templateCode} answers={analysis.answers} />
       <button className="scan-button" onClick={onNext}>
@@ -749,28 +855,75 @@ function SuccessScreen({ analysis, onNext }: { analysis: Analysis; onNext: () =>
   );
 }
 
-function HistoryScreen({ scannedCount, forms, onBack, onOpen, onExport }: { scannedCount: number; forms: StoredSummary[]; onBack: () => void; onOpen: (id: number) => void; onExport: () => void }) {
+function HistoryScreen({
+  scannedCount,
+  forms,
+  total,
+  loading,
+  exporting,
+  onBack,
+  onOpen,
+  onExport,
+  onLoadMore
+}: {
+  scannedCount: number;
+  forms: StoredSummary[];
+  total: number;
+  loading: boolean;
+  exporting: boolean;
+  onBack: () => void;
+  onOpen: (id: number) => void;
+  onExport: (format: "numeric" | "text") => void;
+  onLoadMore: () => void;
+}) {
   return (
     <main className="app">
       <Header scannedCount={scannedCount} onHistory={onBack} />
       <section className="screen">
         <div className="status-title">Geçmiş Taramalar</div>
-        <button className="primary-button" onClick={onExport} disabled={forms.length === 0}>
-          EXCEL'E AKTAR
-        </button>
+        {exporting && <div className="panel">Excel hazırlanıyor…</div>}
+        <div className="export-actions">
+          <button className="primary-button" onClick={() => onExport("numeric")} disabled={forms.length === 0 || exporting}>
+            EXCEL'E AKTAR (sayısal)
+          </button>
+          <button className="secondary-button" onClick={() => onExport("text")} disabled={forms.length === 0 || exporting}>
+            EXCEL'E AKTAR (metin)
+          </button>
+        </div>
         {forms.length === 0 && <div className="panel">Kayıt bulunamadı.</div>}
         {forms.length > 0 && (
           <div className="history-table-wrap">
             <table className="history-table">
-              <thead><tr><th>Kayıt</th><th>Tarih</th><th>Güven</th><th>Boş</th><th>Manuel</th></tr></thead>
-              <tbody>{forms.map((form) => (
-                <tr key={form.id} onClick={() => onOpen(form.id)} tabIndex={0}>
-                  <td>#{form.id}</td><td>{new Date(form.createdAt).toLocaleString("tr-TR")}</td>
-                  <td>%{Math.round(form.formConfidence * 100)}</td><td>{form.blankCount}</td><td>{form.manualCount}</td>
+              <thead>
+                <tr>
+                  <th>Kayıt</th>
+                  <th>Tarih</th>
+                  <th>Güven</th>
+                  <th>Boş</th>
+                  <th>Manuel</th>
                 </tr>
-              ))}</tbody>
+              </thead>
+              <tbody>
+                {forms.map((form) => (
+                  <tr key={form.id} onClick={() => onOpen(form.id)} tabIndex={0}>
+                    <td>
+                      #{form.id}
+                      {form.possibleDuplicate ? " *" : ""}
+                    </td>
+                    <td>{new Date(form.createdAt).toLocaleString("tr-TR")}</td>
+                    <td>%{Math.round(form.formConfidence * 100)}</td>
+                    <td>{form.blankCount}</td>
+                    <td>{form.manualCount}</td>
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
+        )}
+        {forms.length < total && (
+          <button className="secondary-button" onClick={onLoadMore} disabled={loading}>
+            {loading ? "Yükleniyor…" : "Daha fazla yükle"}
+          </button>
         )}
         <button className="secondary-button" onClick={onBack}>
           GERİ
@@ -818,6 +971,31 @@ function AnswerList({ templateCode, answers, showConfidence = false }: { templat
       ))}
     </div>
   );
+}
+
+function adminHeaders(): HeadersInit {
+  return ADMIN_TOKEN ? { "X-Admin-Token": ADMIN_TOKEN } : {};
+}
+
+function isTimeoutError(err: unknown): boolean {
+  return err instanceof Error && (err.name === "AbortError" || err.message.includes("yanıt vermiyor"));
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true }
+    );
+  });
 }
 
 async function extractError(response: Response): Promise<string> {

@@ -29,6 +29,9 @@ function cleanAnalysis(overrides: Partial<Record<string, unknown>> = {}) {
 function mockFetchAnalysis(payload: unknown) {
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url.includes("/healthz") || url.includes("/readyz")) {
+      return new Response(JSON.stringify({ status: "ok" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     if (url.includes("/api/omr/analyze")) {
       return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
     }
