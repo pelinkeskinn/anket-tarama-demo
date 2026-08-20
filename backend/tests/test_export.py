@@ -50,7 +50,7 @@ def _answers() -> list[AnswerResult]:
     return answers
 
 
-def test_numeric_export_scores_and_summary(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_numeric_export_scores_and_legend(tmp_path) -> None:  # type: ignore[no-untyped-def]
     TestingSession = _override_db(tmp_path)
     with TestingSession() as session:
         create_form(
@@ -69,7 +69,10 @@ def test_numeric_export_scores_and_summary(tmp_path) -> None:  # type: ignore[no
         assert response.status_code == 200
         workbook = load_workbook(BytesIO(response.content))
         sheet = workbook["Anket Kayıtları"]
-        summary = workbook["Özet"]
+        assert "Özet" not in workbook.sheetnames
+        key_sheet = workbook["Puan Anahtarı"]
+        assert sheet["G1"].value == "Soru 1 (G)"
+        assert sheet["R1"].value == "Soru 12 (S)"
         assert sheet["G2"].value == SCORE_MAP["NEVER"]
         assert sheet["H2"].value == SCORE_MAP["SOMETIMES"]
         assert sheet["I2"].value == SCORE_MAP["OFTEN"]
@@ -81,10 +84,25 @@ def test_numeric_export_scores_and_summary(tmp_path) -> None:  # type: ignore[no
         assert sheet.cell(1, 33).value == "Toplam Puan"
         assert sheet.cell(1, 34).value == "Yanıtlanan Soru Sayısı"
         assert isinstance(sheet.cell(2, 33).value, (int, float))
-        assert summary["B2"].value == 1
+        assert key_sheet["A1"].value == "Puan Anahtarı"
+        assert key_sheet["A4"].value == "Genel sorular (Soru 1-11)"
+        assert key_sheet["A6"].value == "Hiçbir zaman"
+        assert key_sheet["B6"].value == int(SCORE_MAP["NEVER"])
+        assert key_sheet["A7"].value == "Ara sıra"
+        assert key_sheet["B7"].value == int(SCORE_MAP["SOMETIMES"])
+        assert key_sheet["A13"].value == "Sıklık soruları (Soru 12-26)"
+        assert key_sheet["A15"].value == "Hiçbir zaman"
+        assert key_sheet["A16"].value == "1-2 kez/hafta"
+        legend_text = " ".join(str(cell.value) for row in key_sheet.iter_rows() for cell in row if cell.value)
+        assert "NEVER" not in legend_text
+        assert "ALWAYS" not in legend_text
+        assert "SOMETIMES" not in legend_text
+        assert "OFTEN" not in legend_text
         text_response = client.get("/api/forms/export.xlsx?format=text")
         text_book = load_workbook(BytesIO(text_response.content))
         assert text_book.active["G2"].value == "Hiçbir zaman"
+        assert "Puan Anahtarı" in text_book.sheetnames
+        assert "Özet" not in text_book.sheetnames
     finally:
         app.dependency_overrides.clear()
 

@@ -1,9 +1,12 @@
+import { vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 Object.defineProperty(window, "isSecureContext", {
   configurable: true,
   value: true
 });
+
+window.scrollTo = vi.fn();
 
 HTMLCanvasElement.prototype.getContext = function getContext() {
   return {

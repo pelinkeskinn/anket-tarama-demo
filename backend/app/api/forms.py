@@ -14,13 +14,15 @@ from app.auth import require_admin
 from app.database import create_form, delete_form, get_form, iter_form_details, list_forms
 from app.db import get_session
 from app.models import StoredFormCreate, StoredFormDetail, StoredFormPage
-from app.scoring import SCORE_MAP, answer_score, is_review_cell
+from app.scoring import FREQUENCY_QUESTION_START, SCORE_MAP, answer_score, is_review_cell
 
 
 router = APIRouter(prefix="/api/forms", tags=["forms"])
 
 REVIEW_FILL = PatternFill("solid", fgColor="F4A261")
 MAX_EXPORT_QUESTIONS = 26
+LEGEND_TEMPLATE = "HEALTHY_NUTRITION_V2"
+EMPTY_SCORE_NOTE = "Boş hücre — sayıma dahil edilmez"
 
 
 def _not_found() -> HTTPException:
@@ -63,7 +65,10 @@ def export_forms(
         "Güven (%)",
         "Boş",
         "Manuel",
-        *[f"Soru {number}" for number in range(1, question_count + 1)],
+        *[
+            f"Soru {number} ({'G' if number < FREQUENCY_QUESTION_START else 'S'})"
+            for number in range(1, question_count + 1)
+        ],
         "Toplam Puan",
         "Yanıtlanan Soru Sayısı",
     ]
@@ -74,10 +79,6 @@ def export_forms(
         cell.font = Font(color="FFFFFF", bold=True)
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center")
-
-    totals: list[float] = []
-    question_sums = [0.0] * question_count
-    question_counts = [0] * question_count
 
     for form in forms:
         answers_by_no = {answer.questionNo: answer for answer in form.answers}
@@ -105,12 +106,9 @@ def export_forms(
             if score is not None:
                 scored_values.append(score)
                 answered += 1
-                question_sums[number - 1] += score
-                question_counts[number - 1] += 1
             elif is_review_cell(value, status):
                 review_columns.append(6 + number)
         total_score = sum(scored_values)
-        totals.append(total_score)
         row_values.extend([total_score, answered])
         sheet.append(row_values)
         if format == "numeric":
@@ -126,24 +124,7 @@ def export_forms(
     for column in range(4, last_column + 1):
         sheet.column_dimensions[get_column_letter(column)].width = 17
 
-    summary = workbook.create_sheet("Özet")
-    summary.append(["Ölçüt", "Değer"])
-    summary["A1"].font = Font(bold=True, color="FFFFFF")
-    summary["B1"].font = Font(bold=True, color="FFFFFF")
-    summary["A1"].fill = header_fill
-    summary["B1"].fill = header_fill
-    summary.append(["Toplam kayıt", len(forms)])
-    summary.append(["Ortalama toplam puan", round(sum(totals) / len(totals), 2) if totals else None])
-    summary.append(["Puanlama", ", ".join(f"{key}={int(value) if value == int(value) else value}" for key, value in SCORE_MAP.items())])
-    summary.append([])
-    summary.append(["Soru", "Ortalama puan", "Yanıt sayısı"])
-    for number in range(1, question_count + 1):
-        count = question_counts[number - 1]
-        average = round(question_sums[number - 1] / count, 2) if count else None
-        summary.append([f"Soru {number}", average, count])
-    summary.column_dimensions["A"].width = 36
-    summary.column_dimensions["B"].width = 18
-    summary.column_dimensions["C"].width = 16
+    _write_score_key_sheet(workbook, header_fill, question_count)
 
     output = BytesIO()
     workbook.save(output)
@@ -151,6 +132,64 @@ def export_forms(
     filename = "anket-kayitlari.xlsx" if format == "numeric" else "anket-kayitlari-metin.xlsx"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return StreamingResponse(output, headers=headers, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+def _write_score_key_sheet(workbook: Workbook, header_fill: PatternFill, question_count: int) -> None:
+    sheet = workbook.create_sheet("Puan Anahtarı")
+    sheet["A1"] = "Puan Anahtarı"
+    sheet["A1"].font = Font(bold=True, size=14)
+    sheet.merge_cells("A1:B1")
+    sheet["A2"] = "G = genel sorular, S = sıklık soruları. Belirsiz hücreler 1. sayfada turuncu işaretlenir."
+    sheet.merge_cells("A2:B2")
+
+    general_end = min(FREQUENCY_QUESTION_START - 1, question_count)
+    frequency_end = max(question_count, FREQUENCY_QUESTION_START)
+    _append_legend_table(
+        sheet,
+        start_row=4,
+        title=f"Genel sorular (Soru 1-{general_end})",
+        sample_question=1,
+        header_fill=header_fill,
+    )
+    _append_legend_table(
+        sheet,
+        start_row=13,
+        title=f"Sıklık soruları (Soru {FREQUENCY_QUESTION_START}-{frequency_end})",
+        sample_question=FREQUENCY_QUESTION_START,
+        header_fill=header_fill,
+    )
+    sheet.column_dimensions["A"].width = 36
+    sheet.column_dimensions["B"].width = 42
+
+
+def _append_legend_table(
+    sheet,
+    *,
+    start_row: int,
+    title: str,
+    sample_question: int,
+    header_fill: PatternFill,
+) -> None:
+    sheet.cell(start_row, 1, title).font = Font(bold=True)
+    sheet.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=2)
+    header_row = start_row + 1
+    sheet.cell(header_row, 1, "Görünen cevap")
+    sheet.cell(header_row, 2, "Puan")
+    for column in (1, 2):
+        cell = sheet.cell(header_row, column)
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.fill = header_fill
+    row = header_row + 1
+    for value in SCORE_MAP:
+        sheet.cell(row, 1, _answer_label_text(LEGEND_TEMPLATE, sample_question, value))
+        score = SCORE_MAP[value]
+        sheet.cell(row, 2, int(score) if score == int(score) else score)
+        row += 1
+    sheet.cell(row, 1, "Boş")
+    sheet.cell(row, 2, EMPTY_SCORE_NOTE)
+    row += 1
+    sheet.cell(row, 1, "Belirsiz")
+    sheet.cell(row, 2, f"{EMPTY_SCORE_NOTE} (turuncu)")
 
 
 def _answer_label_text(template_code: str, question_no: int, value: str | None) -> str:

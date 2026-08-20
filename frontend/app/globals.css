@@ -305,6 +305,38 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  padding-bottom: 132px;
+}
+
+.action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 8;
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+  padding: 12px 0 calc(8px + env(safe-area-inset-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -8px 18px rgba(17, 24, 28, 0.08);
+}
+
+.action-bar .scan-button,
+.action-bar .primary-button,
+.action-bar .secondary-button,
+.action-bar .danger-button {
+  width: 100%;
+}
+
+@media (max-width: 760px) {
+  .action-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  }
 }
 
 .panel {

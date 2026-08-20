@@ -27,16 +27,20 @@ function cleanAnalysis(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 function mockFetchAnalysis(payload: unknown) {
-  global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+  global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    const method = init?.method ?? "GET";
     if (url.includes("/healthz") || url.includes("/readyz")) {
       return new Response(JSON.stringify({ status: "ok" }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.includes("/api/omr/analyze")) {
       return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
     }
+    if (url.includes("/api/forms") && method === "GET" && !/\/api\/forms\/\d+/.test(url)) {
+      return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     if (url.includes("/api/forms")) {
-      return new Response(JSON.stringify({ id: 1, createdAt: new Date().toISOString(), ...payload }), {
+      return new Response(JSON.stringify({ id: 1, createdAt: new Date().toISOString(), ...((payload as object) ?? {}) }), {
         status: 200,
         headers: { "Content-Type": "application/json" }
       });
@@ -63,6 +67,10 @@ beforeEach(() => {
   vi.useRealTimers();
   localStorage.clear();
   global.crypto.randomUUID = vi.fn(() => "request-id");
+  Object.defineProperty(HTMLMediaElement.prototype, "play", {
+    configurable: true,
+    value: vi.fn(async () => undefined)
+  });
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
     value: { getUserMedia: vi.fn(async () => stream) }
@@ -100,6 +108,7 @@ describe("scanner page", () => {
     render(<Page />);
     await uploadImage();
     expect(await screen.findByText("Fotoğraf alındı.")).toBeInTheDocument();
+    expect(screen.getByText("İptal Et")).toBeInTheDocument();
   });
 
   test("retry ignores stale analyze results", async () => {
@@ -128,7 +137,7 @@ describe("scanner page", () => {
     act(() => {
       vi.advanceTimersByTime(9200);
     });
-    fireEvent.click(screen.getByText("Tekrar Dene"));
+    fireEvent.click(screen.getByText("İptal Et"));
     expect(screen.getByText("TARAT")).toBeInTheDocument();
 
     await act(async () => {
@@ -164,6 +173,7 @@ describe("scanner page", () => {
     expect(await screen.findByText("Manuel kontrol")).toBeInTheDocument();
     expect(screen.getByText("Soru 7")).toBeInTheDocument();
     expect(screen.getByText("Form seçeneği 2")).toBeInTheDocument();
+    expect(screen.getByText("VAZGEÇ, YENİDEN TARA")).toBeInTheDocument();
   });
 
   test("keeps a healthy form with many uncertain answers editable", async () => {
@@ -200,6 +210,8 @@ describe("scanner page", () => {
     render(<Page />);
     await uploadImage();
     expect(await screen.findByText("Form başarıyla okundu")).toBeInTheDocument();
+    expect(screen.getByText("SONRAKİ FORMA GEÇ")).toBeInTheDocument();
+    expect(screen.getByText("Bu kaydı sil ve yeniden tara")).toBeInTheDocument();
   });
 
   test("next form returns to scanner and increments counter", async () => {
@@ -248,5 +260,16 @@ describe("scanner page", () => {
     fireEvent.click(screen.getByText("Demo Görseller"));
     fireEvent.click(screen.getByText("Demo Görselini Tara"));
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining("/api/demo/sample-forms/filled-clean-v2.png")));
+  });
+
+  test("browser back from history returns to scanner", async () => {
+    mockFetchAnalysis(cleanAnalysis());
+    render(<Page />);
+    fireEvent.click(screen.getByText("Geçmiş Taramalar"));
+    expect(await screen.findByText("Kayıt bulunamadı.")).toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: { screen: "scanner" } }));
+    });
+    expect(await screen.findByText("TARAT")).toBeInTheDocument();
   });
 });

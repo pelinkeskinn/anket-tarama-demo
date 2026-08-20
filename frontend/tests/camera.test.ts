@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { captureScale, fullCameraFrame, guideCaptureRegion } from "../app/camera";
+import { captureScale, framesEqual, fullCameraFrame, guideCaptureRegion } from "../app/camera";
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) } as DOMRect;
@@ -36,5 +36,12 @@ describe("camera capture region", () => {
     } as HTMLVideoElement;
 
     expect(guideCaptureRegion(video, null)).toEqual(fullCameraFrame(video));
+  });
+
+  test("detects identical frozen frames", () => {
+    const frame = new Uint8ClampedArray([1, 2, 3]);
+    expect(framesEqual(frame, new Uint8ClampedArray([1, 2, 3]))).toBe(true);
+    expect(framesEqual(frame, new Uint8ClampedArray([1, 2, 4]))).toBe(false);
+    expect(framesEqual(null, frame)).toBe(false);
   });
 });

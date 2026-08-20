@@ -9,7 +9,7 @@ SCORE_MAP: dict[str, float] = {
     "ALWAYS": 4.0,
 }
 
-UNCERTAIN_STATUSES = frozenset({"UNCERTAIN", "INVALID", "MULTIPLE", "AMBIGUOUS", "DOUBLE_MARK"})
+FREQUENCY_QUESTION_START = 12
 
 
 def answer_score(value: str | None, status: str | None = None) -> float | None:

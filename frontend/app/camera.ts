@@ -45,6 +45,14 @@ export function guideCaptureRegion(video: HTMLVideoElement, guide: HTMLElement |
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
+export function framesEqual(left: Uint8ClampedArray | null, right: Uint8ClampedArray | null): boolean {
+  if (!left || !right || left.length !== right.length || left.length === 0) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
 }

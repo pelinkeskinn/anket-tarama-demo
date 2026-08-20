@@ -1,20 +1,23 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 
-import { CAMERA_JPEG_QUALITY, captureScale, fullCameraFrame, guideCaptureRegion, type CaptureRegion } from "./camera";
+import { CAMERA_JPEG_QUALITY, captureScale, framesEqual, fullCameraFrame, guideCaptureRegion, type CaptureRegion } from "./camera";
+import { pushAppScreen, readPopStateScreen, replaceAppScreen, type AppScreen } from "./screenNavigation";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://anket-tarama-backend.onrender.com").replace(/\/$/, "");
 const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN ?? "";
 const CAMERA_CHECK_INTERVAL_MS = 220;
 const REQUIRED_STABLE_FRAMES = 2;
+const FROZEN_FRAME_CHECKS = 10;
 const ANALYZE_TIMEOUT_MS = 45000;
 const HISTORY_PAGE_SIZE = 50;
 
 type AnswerValue = "NEVER" | "SOMETIMES" | "OFTEN" | "ALWAYS" | "BLANK";
 type AnswerStatus = "OK" | "BLANK" | "DOUBLE_MARK" | "UNCERTAIN" | "MARKED" | "MULTIPLE" | "INVALID" | "AMBIGUOUS";
 type AnswerSource = "AUTO" | "MANUAL" | "UNRESOLVED";
-type Screen = "scanner" | "processing" | "manual" | "blankConfirm" | "success" | "duplicate" | "fatal" | "history" | "detail";
+type Screen = AppScreen;
+type CameraState = "idle" | "ready" | "denied" | "unsupported" | "insecure" | "stalled";
 
 type Answer = {
   questionNo: number;
@@ -98,10 +101,13 @@ export default function Page() {
   const autoCaptureRef = useRef(false);
   const previousFrameRef = useRef<Uint8ClampedArray | null>(null);
   const stableFramesRef = useRef(0);
+  const frozenFramesRef = useRef(0);
+  const restartingCameraRef = useRef(false);
+  const screenRef = useRef<Screen>("scanner");
   const activeAnalyzeRef = useRef<{ id: number; controller: AbortController } | null>(null);
   const analyzeSequenceRef = useRef(0);
   const [screen, setScreen] = useState<Screen>("scanner");
-  const [cameraState, setCameraState] = useState<"idle" | "ready" | "denied" | "unsupported" | "insecure">("idle");
+  const [cameraState, setCameraState] = useState<CameraState>("idle");
   const [quality, setQuality] = useState<"bad" | "warn" | "ready">("bad");
   const [guidance, setGuidance] = useState("Formu çerçevenin içine alın");
   const [processingText, setProcessingText] = useState("Fotoğraf alındı.\nKağıdı kaldırabilirsiniz.");
@@ -117,15 +123,61 @@ export default function Page() {
   const [exporting, setExporting] = useState(false);
   const [detail, setDetail] = useState<StoredDetail | null>(null);
   const [pendingDuplicate, setPendingDuplicate] = useState<Analysis | null>(null);
+  const [savedFormId, setSavedFormId] = useState<number | null>(null);
+
+  screenRef.current = screen;
+
+  function goToScreen(next: Screen, mode: "push" | "replace" | "silent" = "push") {
+    setScreen(next);
+    if (mode === "push") pushAppScreen(next);
+    if (mode === "replace") replaceAppScreen(next);
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }
 
   useEffect(() => {
     setScannedCount(Number(localStorage.getItem("demoScannedCount") ?? "0"));
+    replaceAppScreen("scanner");
     if (!window.isSecureContext) {
       setCameraState("insecure");
-    } else {
+    }
+    const onPopState = (event: PopStateEvent) => {
+      const next = readPopStateScreen(event);
+      if (!next) {
+        return;
+      }
+      goToScreen(next, "silent");
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      stopCamera();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (screen !== "scanner") {
+      pauseCamera();
+    }
+  }, [screen]);
+
+  useEffect(() => {
+    if (screen === "scanner" && cameraState === "idle") {
       void requestCamera();
     }
-    return () => stopCamera();
+  }, [screen, cameraState]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible" || screenRef.current !== "scanner") {
+        return;
+      }
+      setGuidance("Kamera yeniden başlatılıyor…");
+      pauseCamera();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
   useEffect(() => {
@@ -144,12 +196,24 @@ export default function Page() {
     autoCaptureRef.current = false;
     previousFrameRef.current = null;
     stableFramesRef.current = 0;
+    frozenFramesRef.current = 0;
     const timer = window.setInterval(() => {
       const video = videoRef.current;
       if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || submittingRef.current || autoCaptureRef.current) {
         return;
       }
       const check = inspectCameraFrame(video, frameRef.current, previousFrameRef.current);
+      if (framesEqual(previousFrameRef.current, check.frame)) {
+        frozenFramesRef.current += 1;
+        if (frozenFramesRef.current >= FROZEN_FRAME_CHECKS && !restartingCameraRef.current) {
+          frozenFramesRef.current = 0;
+          setGuidance("Kamera yeniden başlatılıyor…");
+          pauseCamera();
+          return;
+        }
+      } else {
+        frozenFramesRef.current = 0;
+      }
       previousFrameRef.current = check.frame;
       if (check.brightness < 45) {
         stableFramesRef.current = 0;
@@ -209,6 +273,8 @@ export default function Page() {
       setCameraState("insecure");
       return;
     }
+    restartingCameraRef.current = true;
+    stopCamera();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -224,6 +290,8 @@ export default function Page() {
       await attachCameraStream();
     } catch {
       setCameraState("denied");
+    } finally {
+      restartingCameraRef.current = false;
     }
   }
 
@@ -242,13 +310,29 @@ export default function Page() {
     try {
       await video.play();
     } catch {
-      // Some mobile browsers only allow playback after the element finishes loading metadata.
+      await sleep(300);
+      try {
+        await video.play();
+      } catch {
+        setCameraState("stalled");
+      }
     }
   }
 
   function stopCamera() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    const video = videoRef.current;
+    if (video) {
+      video.srcObject = null;
+    }
+  }
+
+  function pauseCamera() {
+    stopCamera();
+    setCameraState((current) =>
+      current === "denied" || current === "unsupported" || current === "insecure" ? current : "idle"
+    );
   }
 
   async function captureAndAnalyze(automatic = false) {
@@ -299,7 +383,7 @@ export default function Page() {
     const controller = new AbortController();
     activeAnalyzeRef.current = { id: requestId, controller };
     setError("");
-    setScreen("processing");
+    goToScreen("processing");
     setProcessingText("Fotoğraf alındı.\nKağıdı kaldırabilirsiniz.");
     let timedOut = false;
     const timeoutTimer = window.setTimeout(() => {
@@ -362,7 +446,7 @@ export default function Page() {
         return;
       }
       setError(timedOut || isTimeoutError(err) ? "Sunucu yanıt vermiyor, tekrar deneyin" : readClientError(err));
-      setScreen("fatal");
+      goToScreen("fatal");
     } finally {
       window.clearTimeout(timeoutTimer);
       stageTimers.forEach((timer) => window.clearTimeout(timer));
@@ -409,7 +493,7 @@ export default function Page() {
     activeAnalyzeRef.current?.controller.abort();
     activeAnalyzeRef.current = null;
     submittingRef.current = false;
-    setScreen("scanner");
+    goToScreen("scanner", "replace");
   }
 
   function handleAnalysis(payload: Analysis) {
@@ -418,16 +502,16 @@ export default function Page() {
     setManualSelections({});
     if (payload.status === "TOO_MANY_UNCERTAIN") {
       setError("Bu formda çok fazla cevap güvenilir biçimde okunamadı.\nFormu yeniden taratın.");
-      setScreen("fatal");
+      goToScreen("fatal");
       return;
     }
     if (payload.reviewRequiredCount > 0) {
-      setScreen("manual");
+      goToScreen("manual");
       return;
     }
     setFinalAnalysis(payload);
     if (payload.blankCount > 0) {
-      setScreen("blankConfirm");
+      goToScreen("blankConfirm");
       return;
     }
     void completeOrWarnDuplicate(payload);
@@ -463,7 +547,7 @@ export default function Page() {
     updated.blankCount = updated.answers.filter((answer) => answer.value === "BLANK").length;
     setFinalAnalysis(updated);
     if (updated.blankCount > 0) {
-      setScreen("blankConfirm");
+      goToScreen("blankConfirm");
       return;
     }
     void completeOrWarnDuplicate(updated);
@@ -472,7 +556,7 @@ export default function Page() {
   async function completeOrWarnDuplicate(payload: Analysis) {
     if (looksDuplicate(payload)) {
       setPendingDuplicate(payload);
-      setScreen("duplicate");
+      goToScreen("duplicate");
       return;
     }
     await saveAndShowSuccess(payload);
@@ -491,12 +575,33 @@ export default function Page() {
     });
     if (!response.ok) {
       setError("Cevaplar SQLite veritabanına kaydedilemedi.");
-      setScreen("fatal");
+      goToScreen("fatal");
       return;
     }
     rememberSequence(payload);
+    const saved = (await response.json()) as StoredDetail;
+    setSavedFormId(saved.id);
     setFinalAnalysis(payload);
-    setScreen("success");
+    goToScreen("success");
+  }
+
+  function retryFromReview() {
+    setAnalysis(null);
+    setFinalAnalysis(null);
+    setManualSelections({});
+    goToScreen("scanner", "replace");
+  }
+
+  async function discardSavedAndRescan() {
+    if (savedFormId != null) {
+      await fetch(`${API_BASE}/api/forms/${savedFormId}`, { method: "DELETE", headers: adminHeaders() });
+    }
+    setSavedFormId(null);
+    setAnalysis(null);
+    setFinalAnalysis(null);
+    setPendingDuplicate(null);
+    setManualSelections({});
+    goToScreen("scanner", "replace");
   }
 
   function nextForm() {
@@ -506,9 +611,11 @@ export default function Page() {
     setAnalysis(null);
     setFinalAnalysis(null);
     setPendingDuplicate(null);
+    setSavedFormId(null);
+    setManualSelections({});
     setQuality("bad");
     setGuidance("Taranan formu kaldırın");
-    setScreen("scanner");
+    goToScreen("scanner", "replace");
     window.setTimeout(() => setGuidance("Yeni formu yerleştirin"), 1800);
   }
 
@@ -516,7 +623,7 @@ export default function Page() {
     const response = await fetch(`${API_BASE}/api/demo/sample-forms/${demoName}`);
     if (!response.ok) {
       setError("Demo görsel yüklenemedi.");
-      setScreen("fatal");
+      goToScreen("fatal");
       return;
     }
     await analyzeBlob(await response.blob());
@@ -540,7 +647,7 @@ export default function Page() {
       if (reset) {
         setHistory([]);
         setHistoryTotal(0);
-        setScreen("history");
+        goToScreen("history");
       }
       setHistoryLoading(false);
       return;
@@ -550,7 +657,11 @@ export default function Page() {
     const total = Array.isArray(payload) ? payload.length : payload.total;
     setHistory(reset ? items : [...history, ...items]);
     setHistoryTotal(total);
-    setScreen("history");
+    if (screenRef.current === "history") {
+      goToScreen("history", "silent");
+    } else {
+      goToScreen("history");
+    }
     setHistoryLoading(false);
   }
 
@@ -558,7 +669,7 @@ export default function Page() {
     const response = await fetch(`${API_BASE}/api/forms/${id}`, { headers: adminHeaders() });
     if (response.ok) {
       setDetail((await response.json()) as StoredDetail);
-      setScreen("detail");
+      goToScreen("detail");
     }
   }
 
@@ -597,7 +708,7 @@ export default function Page() {
         total={historyTotal}
         loading={historyLoading}
         exporting={exporting}
-        onBack={() => setScreen("scanner")}
+        onBack={() => goToScreen("scanner", "replace")}
         onOpen={openDetail}
         onExport={exportExcel}
         onLoadMore={() => void loadHistory(false)}
@@ -660,28 +771,37 @@ export default function Page() {
       )}
 
       {screen === "processing" && (
-        <StatusScreen title={processingText} button="Tekrar Dene" onClick={cancelAnalyzeAndReturnToScanner} />
+        <StatusScreen title={processingText} button="İptal Et" onClick={cancelAnalyzeAndReturnToScanner} />
       )}
 
       {screen === "manual" && analysis && (
-        <ManualReview templateCode={analysis.templateCode} answers={reviewAnswers} selections={manualSelections} onSelect={chooseManual} onContinue={continueManual} />
+        <ManualReview
+          templateCode={analysis.templateCode}
+          answers={reviewAnswers}
+          selections={manualSelections}
+          onSelect={chooseManual}
+          onContinue={continueManual}
+          onRetry={retryFromReview}
+        />
       )}
 
       {screen === "blankConfirm" && finalAnalysis && (
-        <BlankConfirm blanks={blankAnswers} onRetry={() => setScreen("scanner")} onContinue={() => void completeOrWarnDuplicate(finalAnalysis)} />
+        <BlankConfirm blanks={blankAnswers} onRetry={() => goToScreen("scanner", "replace")} onContinue={() => void completeOrWarnDuplicate(finalAnalysis)} />
       )}
 
       {screen === "duplicate" && pendingDuplicate && (
         <DuplicateWarning
           onSkip={nextForm}
           onContinue={() => void saveAndShowSuccess(pendingDuplicate)}
-          onRetry={() => setScreen("scanner")}
+          onRetry={() => goToScreen("scanner", "replace")}
         />
       )}
 
-      {screen === "success" && finalAnalysis && <SuccessScreen analysis={finalAnalysis} onNext={nextForm} />}
+      {screen === "success" && finalAnalysis && (
+        <SuccessScreen analysis={finalAnalysis} onNext={nextForm} onDiscard={() => void discardSavedAndRescan()} />
+      )}
 
-      {screen === "fatal" && <StatusScreen title={error} button="TEKRAR TARAT" onClick={() => setScreen("scanner")} />}
+      {screen === "fatal" && <StatusScreen title={error} button="TEKRAR TARAT" onClick={() => goToScreen("scanner", "replace")} />}
     </main>
   );
 }
@@ -704,15 +824,15 @@ function CameraFallback({
   state,
   onRequest
 }: {
-  state: "idle" | "ready" | "denied" | "unsupported" | "insecure";
+  state: CameraState;
   onRequest: () => void;
 }) {
   let message = "Kamera hazırlanıyor...";
   if (state === "denied") {
     message = "Form tarayabilmek için kamera izni vermeniz gerekiyor.";
   }
-  if (state === "idle") {
-    message = "Kamerayı başlatmak için butona dokunun.";
+  if (state === "idle" || state === "stalled") {
+    message = state === "stalled" ? "Kamera durdu. Yeniden başlatmak için butona dokunun." : "Kamerayı başlatmak için butona dokunun.";
   }
   if (state === "unsupported") {
     message = "Bu tarayıcı kamera ile taramayı desteklemiyor.";
@@ -724,7 +844,7 @@ function CameraFallback({
     <div className="camera-placeholder">
       <div className="stack">
         <strong>{message}</strong>
-        {(state === "denied" || state === "idle" || state === "insecure") && (
+        {(state === "denied" || state === "idle" || state === "insecure" || state === "stalled") && (
           <button className="primary-button" onClick={onRequest}>
             Kamerayı Başlat
           </button>
@@ -743,53 +863,84 @@ function StatusScreen({ title, button, onClick }: { title: string; button?: stri
             {line}
           </div>
         ))}
-        {button && (
+      </div>
+      {button && (
+        <div className="action-bar">
           <button className="primary-button" onClick={onClick}>
             {button}
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </section>
   );
 }
+
+const ReviewQuestion = memo(function ReviewQuestion({
+  templateCode,
+  answer,
+  selected,
+  onSelect
+}: {
+  templateCode: string;
+  answer: Answer;
+  selected?: AnswerValue;
+  onSelect: (questionNo: number, value: AnswerValue) => void;
+}) {
+  return (
+    <div className="panel stack">
+      <strong>Soru {answer.questionNo}</strong>
+      <span className="muted">{labels[answer.status]}</span>
+      <div className="review-options">
+        {(["NEVER", "SOMETIMES", "OFTEN", "ALWAYS", "BLANK"] as const).map((value) => (
+          <button
+            key={value}
+            className={`option-button ${selected === value ? "selected" : ""}`}
+            onClick={() => onSelect(answer.questionNo, value)}
+          >
+            {value === "BLANK" ? "Boş bırak" : answerOptionLabelForAnswer(templateCode, answer, value)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+});
 
 function ManualReview({
   templateCode,
   answers,
   selections,
   onSelect,
-  onContinue
+  onContinue,
+  onRetry
 }: {
   templateCode: string;
   answers: Answer[];
   selections: Record<number, AnswerValue>;
   onSelect: (questionNo: number, value: AnswerValue) => void;
   onContinue: () => void;
+  onRetry: () => void;
 }) {
   const complete = answers.every((answer) => selections[answer.questionNo]);
   return (
     <section className="screen">
       <div className="status-title">Manuel kontrol</div>
       {answers.map((answer) => (
-        <div className="panel stack" key={answer.questionNo}>
-          <strong>Soru {answer.questionNo}</strong>
-          <span className="muted">{labels[answer.status]}</span>
-          <div className="review-options">
-            {(["NEVER", "SOMETIMES", "OFTEN", "ALWAYS", "BLANK"] as const).map((value) => (
-              <button
-                key={value}
-                className={`option-button ${selections[answer.questionNo] === value ? "selected" : ""}`}
-                onClick={() => onSelect(answer.questionNo, value)}
-              >
-                {value === "BLANK" ? "Boş bırak" : answerOptionLabelForAnswer(templateCode, answer, value)}
-              </button>
-            ))}
-          </div>
-        </div>
+        <ReviewQuestion
+          key={answer.questionNo}
+          templateCode={templateCode}
+          answer={answer}
+          selected={selections[answer.questionNo]}
+          onSelect={onSelect}
+        />
       ))}
-      <button className="primary-button" disabled={!complete} onClick={onContinue}>
-        DEVAM ET
-      </button>
+      <div className="action-bar">
+        <button className="secondary-button" onClick={onRetry}>
+          VAZGEÇ, YENİDEN TARA
+        </button>
+        <button className="primary-button" disabled={!complete} onClick={onContinue}>
+          DEVAM ET
+        </button>
+      </div>
     </section>
   );
 }
@@ -803,12 +954,14 @@ function BlankConfirm({ blanks, onRetry, onContinue }: { blanks: Answer[]; onRet
           <strong key={answer.questionNo}>Soru {answer.questionNo}</strong>
         ))}
       </div>
-      <button className="secondary-button" onClick={onRetry}>
-        TEKRAR TARAT
-      </button>
-      <button className="primary-button" onClick={onContinue}>
-        DEVAM ET
-      </button>
+      <div className="action-bar">
+        <button className="secondary-button" onClick={onRetry}>
+          TEKRAR TARAT
+        </button>
+        <button className="primary-button" onClick={onContinue}>
+          DEVAM ET
+        </button>
+      </div>
     </section>
   );
 }
@@ -818,6 +971,8 @@ function DuplicateWarning({ onSkip, onContinue, onRetry }: { onSkip: () => void;
     <section className="screen">
       <div className="panel stack">
         <div className="status-title">Bu form daha önce taranmış bir forma benziyor.</div>
+      </div>
+      <div className="action-bar">
         <button className="danger-button" onClick={onSkip}>
           AYNI FORM — KAYDETME
         </button>
@@ -832,7 +987,7 @@ function DuplicateWarning({ onSkip, onContinue, onRetry }: { onSkip: () => void;
   );
 }
 
-function SuccessScreen({ analysis, onNext }: { analysis: Analysis; onNext: () => void }) {
+function SuccessScreen({ analysis, onNext, onDiscard }: { analysis: Analysis; onNext: () => void; onDiscard: () => void }) {
   const manualCount = analysis.answers.filter((answer) => answer.source === "MANUAL").length;
   const autoCount = analysis.answers.filter((answer) => answer.source === "AUTO").length;
   const blankCount = analysis.answers.filter((answer) => answer.value === "BLANK").length;
@@ -848,9 +1003,14 @@ function SuccessScreen({ analysis, onNext }: { analysis: Analysis; onNext: () =>
         {elapsed && <div>{elapsed} sn'de tamamlandı</div>}
       </div>
       <AnswerList templateCode={analysis.templateCode} answers={analysis.answers} />
-      <button className="scan-button" onClick={onNext}>
-        SONRAKİ FORMA GEÇ
-      </button>
+      <div className="action-bar">
+        <button className="scan-button" onClick={onNext}>
+          SONRAKİ FORMA GEÇ
+        </button>
+        <button className="danger-button" onClick={onDiscard}>
+          Bu kaydı sil ve yeniden tara
+        </button>
+      </div>
     </section>
   );
 }
