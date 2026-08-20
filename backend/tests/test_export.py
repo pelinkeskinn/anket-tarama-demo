@@ -71,19 +71,21 @@ def test_numeric_export_scores_and_legend(tmp_path) -> None:  # type: ignore[no-
         sheet = workbook["Anket Kayıtları"]
         assert "Özet" not in workbook.sheetnames
         key_sheet = workbook["Puan Anahtarı"]
-        assert sheet["G1"].value == "Soru 1 (G)"
-        assert sheet["R1"].value == "Soru 12 (S)"
-        assert sheet["G2"].value == SCORE_MAP["NEVER"]
-        assert sheet["H2"].value == SCORE_MAP["SOMETIMES"]
-        assert sheet["I2"].value == SCORE_MAP["OFTEN"]
-        assert sheet["J2"].value == SCORE_MAP["ALWAYS"]
+        assert sheet["F1"].value == "Soru 1 (G)"
+        assert sheet["Q1"].value == "Soru 12 (S)"
+        assert sheet["F2"].value == SCORE_MAP["NEVER"]
+        assert sheet["G2"].value == SCORE_MAP["SOMETIMES"]
+        assert sheet["H2"].value == SCORE_MAP["OFTEN"]
+        assert sheet["I2"].value == SCORE_MAP["ALWAYS"]
+        assert sheet["J2"].value is None
         assert sheet["K2"].value is None
-        assert sheet["L2"].value is None
-        fill = str(sheet["L2"].fill.fgColor.rgb or sheet["L2"].fill.fgColor.theme)
-        assert "F4A261" in fill.upper() or sheet["L2"].fill.patternType == "solid"
-        assert sheet.cell(1, 33).value == "Toplam Puan"
-        assert sheet.cell(1, 34).value == "Yanıtlanan Soru Sayısı"
-        assert isinstance(sheet.cell(2, 33).value, (int, float))
+        fill = str(sheet["K2"].fill.fgColor.rgb or sheet["K2"].fill.fgColor.theme)
+        assert "F4A261" in fill.upper() or sheet["K2"].fill.patternType == "solid"
+        header_values = [cell.value for cell in sheet[1]]
+        assert "Güven (%)" not in header_values
+        assert "Toplam Puan" not in header_values
+        assert sheet.cell(1, 32).value == "Yanıtlanan Soru Sayısı"
+        assert isinstance(sheet.cell(2, 32).value, (int, float))
         assert key_sheet["A1"].value == "Puan Anahtarı"
         assert key_sheet["A4"].value == "Genel sorular (Soru 1-11)"
         assert key_sheet["A6"].value == "Hiçbir zaman"
@@ -100,7 +102,7 @@ def test_numeric_export_scores_and_legend(tmp_path) -> None:  # type: ignore[no-
         assert "OFTEN" not in legend_text
         text_response = client.get("/api/forms/export.xlsx?format=text")
         text_book = load_workbook(BytesIO(text_response.content))
-        assert text_book.active["G2"].value == "Hiçbir zaman"
+        assert text_book.active["F2"].value == "Hiçbir zaman"
         assert "Puan Anahtarı" in text_book.sheetnames
         assert "Özet" not in text_book.sheetnames
     finally:
@@ -132,17 +134,16 @@ def test_forms_list_is_paginated(tmp_path) -> None:  # type: ignore[no-untyped-d
         app.dependency_overrides.clear()
 
 
-def test_admin_token_protects_form_reads(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_admin_token_protects_export_and_delete(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("ADMIN_TOKEN", "test-admin")
     _override_db(tmp_path)
     client = TestClient(app)
     try:
-        denied = client.get("/api/forms")
-        assert denied.status_code == 401
-        allowed = client.get("/api/forms", headers={"X-Admin-Token": "test-admin"})
-        assert allowed.status_code == 200
-        assert allowed.json() == {"items": [], "total": 0}
+        listed = client.get("/api/forms")
+        assert listed.status_code == 200
         export_denied = client.get("/api/forms/export.xlsx")
         assert export_denied.status_code == 401
+        delete_denied = client.delete("/api/forms/1")
+        assert delete_denied.status_code == 401
     finally:
         app.dependency_overrides.clear()

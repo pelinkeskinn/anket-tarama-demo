@@ -37,7 +37,6 @@ def save_form(payload: StoredFormCreate, session: Session = Depends(get_session)
 @router.get("", response_model=StoredFormPage)
 def forms(
     session: Session = Depends(get_session),
-    _: None = Depends(require_admin),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> StoredFormPage:
@@ -62,14 +61,12 @@ def export_forms(
         "Kayıt No",
         "Tarih",
         "Şablon",
-        "Güven (%)",
         "Boş",
         "Manuel",
         *[
             f"Soru {number} ({'G' if number < FREQUENCY_QUESTION_START else 'S'})"
             for number in range(1, question_count + 1)
         ],
-        "Toplam Puan",
         "Yanıtlanan Soru Sayısı",
     ]
     sheet.append(headers)
@@ -88,7 +85,6 @@ def export_forms(
             form.id,
             form.createdAt.replace(tzinfo=None),
             form.templateCode,
-            round(form.formConfidence * 100, 1),
             form.blankCount,
             form.manualCount,
         ]
@@ -107,9 +103,8 @@ def export_forms(
                 scored_values.append(score)
                 answered += 1
             elif is_review_cell(value, status):
-                review_columns.append(6 + number)
-        total_score = sum(scored_values)
-        row_values.extend([total_score, answered])
+                review_columns.append(5 + number)
+        row_values.append(answered)
         sheet.append(row_values)
         if format == "numeric":
             for column in review_columns:
@@ -120,7 +115,7 @@ def export_forms(
     sheet.column_dimensions["A"].width = 12
     sheet.column_dimensions["B"].width = 21
     sheet.column_dimensions["C"].width = 25
-    last_column = 8 + question_count
+    last_column = 6 + question_count
     for column in range(4, last_column + 1):
         sheet.column_dimensions[get_column_letter(column)].width = 17
 
@@ -208,7 +203,7 @@ _answer_label = _answer_label_text
 
 
 @router.get("/{form_id}", response_model=StoredFormDetail)
-def form_detail(form_id: int, session: Session = Depends(get_session), _: None = Depends(require_admin)) -> StoredFormDetail:
+def form_detail(form_id: int, session: Session = Depends(get_session)) -> StoredFormDetail:
     form = get_form(form_id, session)
     if form is None:
         raise _not_found()

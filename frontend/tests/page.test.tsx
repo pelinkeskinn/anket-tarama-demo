@@ -272,4 +272,44 @@ describe("scanner page", () => {
     });
     expect(await screen.findByText("TARAT")).toBeInTheDocument();
   });
+
+  test("local history survives when server returns empty list", async () => {
+    const createdAt = new Date().toISOString();
+    localStorage.setItem(
+      "anketTarama.forms",
+      JSON.stringify([
+        {
+          id: 42,
+          createdAt,
+          formConfidence: 0.9,
+          blankCount: 1,
+          manualCount: 0,
+          analysisId: "local-42",
+          templateCode: "DEMO_FORM_V1",
+          answers: []
+        }
+      ])
+    );
+    localStorage.setItem("anketFormsCache", JSON.stringify({ items: [], total: 0 }));
+
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/forms") && !/\/api\/forms\/\d+/.test(url)) {
+        return new Response(JSON.stringify({ items: [], total: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ status: "ok" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    render(<Page />);
+    fireEvent.click(screen.getByText("Geçmiş Taramalar"));
+    expect(await screen.findByText("#42")).toBeInTheDocument();
+  });
+
+  test("page title is anket-tarama", async () => {
+    render(<Page />);
+    expect(screen.getByText("anket-tarama")).toBeInTheDocument();
+  });
 });

@@ -3,6 +3,7 @@
 import { ChangeEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { CAMERA_JPEG_QUALITY, captureScale, framesEqual, fullCameraFrame, guideCaptureRegion, type CaptureRegion } from "./camera";
+import { getLocalForm, localSummaries, removeLocalForm, upsertLocalForm } from "./formArchive";
 import { pushAppScreen, readPopStateScreen, replaceAppScreen, type AppScreen } from "./screenNavigation";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://anket-tarama-backend.onrender.com").replace(/\/$/, "");
@@ -12,6 +13,7 @@ const REQUIRED_STABLE_FRAMES = 2;
 const FROZEN_FRAME_CHECKS = 10;
 const ANALYZE_TIMEOUT_MS = 45000;
 const HISTORY_PAGE_SIZE = 50;
+const HISTORY_CACHE_KEY = "anketFormsCache";
 
 type AnswerValue = "NEVER" | "SOMETIMES" | "OFTEN" | "ALWAYS" | "BLANK";
 type AnswerStatus = "OK" | "BLANK" | "DOUBLE_MARK" | "UNCERTAIN" | "MARKED" | "MULTIPLE" | "INVALID" | "AMBIGUOUS";
@@ -137,8 +139,19 @@ export default function Page() {
   }
 
   useEffect(() => {
-    setScannedCount(Number(localStorage.getItem("demoScannedCount") ?? "0"));
+    const cache = readHistoryCache();
+    const local = localSummaries();
+    const initialTotal = Math.max(
+      cache.total,
+      local.total,
+      Number(localStorage.getItem("demoScannedCount") ?? "0")
+    );
+    setScannedCount(initialTotal);
+    if (local.items.length > 0 && cache.items.length === 0) {
+      writeHistoryCache(mergeHistorySummaries([], local.items), initialTotal);
+    }
     replaceAppScreen("scanner");
+    void refreshRecordCount();
     if (!window.isSecureContext) {
       setCameraState("insecure");
     }
@@ -582,7 +595,11 @@ export default function Page() {
     const saved = (await response.json()) as StoredDetail;
     setSavedFormId(saved.id);
     setFinalAnalysis(payload);
+    rememberCachedForm(saved);
+    upsertLocalForm(saved);
+    setScannedCount(readHistoryCache().total);
     goToScreen("success");
+    void refreshRecordCount();
   }
 
   function retryFromReview() {
@@ -605,7 +622,8 @@ export default function Page() {
   }
 
   function nextForm() {
-    const nextCount = scannedCount + 1;
+    const cachedTotal = readHistoryCache().total;
+    const nextCount = Math.max(scannedCount + 1, cachedTotal);
     localStorage.setItem("demoScannedCount", String(nextCount));
     setScannedCount(nextCount);
     setAnalysis(null);
@@ -617,6 +635,7 @@ export default function Page() {
     setGuidance("Taranan formu kaldırın");
     goToScreen("scanner", "replace");
     window.setTimeout(() => setGuidance("Yeni formu yerleştirin"), 1800);
+    void refreshRecordCount();
   }
 
   async function scanDemoImage() {
@@ -637,44 +656,98 @@ export default function Page() {
     }
   }
 
+  async function refreshRecordCount() {
+    try {
+      const response = await fetch(`${API_BASE}/api/forms?limit=1&offset=0`, { headers: adminHeaders() });
+      if (!response.ok) {
+        return;
+      }
+      const payload = (await response.json()) as { total?: number };
+      if (typeof payload.total === "number") {
+        const cache = readHistoryCache();
+        const local = localSummaries();
+        const mergedItems = mergeHistorySummaries(cache.items, local.items);
+        const total = resolvedHistoryTotal(payload.total, mergedItems);
+        setScannedCount(total);
+        localStorage.setItem("demoScannedCount", String(total));
+        writeHistoryCache(mergedItems, total);
+      }
+    } catch {
+      // Keep the last known local count if the server is waking up.
+    }
+  }
+
   async function loadHistory(reset = true) {
     setHistoryLoading(true);
     const offset = reset ? 0 : history.length;
-    const response = await fetch(`${API_BASE}/api/forms?limit=${HISTORY_PAGE_SIZE}&offset=${offset}`, {
-      headers: adminHeaders()
-    });
-    if (!response.ok) {
-      if (reset) {
-        setHistory([]);
-        setHistoryTotal(0);
+    try {
+      const response = await fetch(`${API_BASE}/api/forms?limit=${HISTORY_PAGE_SIZE}&offset=${offset}`, {
+        headers: adminHeaders()
+      });
+      if (!response.ok) {
+        if (reset) {
+          const cache = readHistoryCache();
+          setHistory(cache.items);
+          setHistoryTotal(cache.total);
+          goToScreen("history");
+        }
+        setHistoryLoading(false);
+        return;
+      }
+      const payload = (await response.json()) as StoredSummary[] | { items: StoredSummary[]; total: number };
+      const serverItems = Array.isArray(payload) ? payload : payload.items ?? [];
+      const serverTotal = Array.isArray(payload) ? payload.length : payload.total ?? serverItems.length;
+      const local = localSummaries();
+      const nextItems = reset
+        ? mergeHistorySummaries(serverItems, local.items)
+        : mergeHistorySummaries([...history, ...serverItems], local.items);
+      const total = resolvedHistoryTotal(serverTotal, nextItems);
+      setHistory(nextItems);
+      setHistoryTotal(total);
+      setScannedCount(total);
+      writeHistoryCache(nextItems, total);
+      if (screenRef.current === "history") {
+        goToScreen("history", "silent");
+      } else {
         goToScreen("history");
       }
-      setHistoryLoading(false);
-      return;
-    }
-    const payload = (await response.json()) as StoredSummary[] | { items: StoredSummary[]; total: number };
-    const items = Array.isArray(payload) ? payload : payload.items;
-    const total = Array.isArray(payload) ? payload.length : payload.total;
-    setHistory(reset ? items : [...history, ...items]);
-    setHistoryTotal(total);
-    if (screenRef.current === "history") {
-      goToScreen("history", "silent");
-    } else {
-      goToScreen("history");
+    } catch {
+      if (reset) {
+        const cache = readHistoryCache();
+        setHistory(cache.items);
+        setHistoryTotal(cache.total);
+        goToScreen("history");
+      }
     }
     setHistoryLoading(false);
   }
 
   async function openDetail(id: number) {
-    const response = await fetch(`${API_BASE}/api/forms/${id}`, { headers: adminHeaders() });
-    if (response.ok) {
-      setDetail((await response.json()) as StoredDetail);
+    try {
+      const response = await fetch(`${API_BASE}/api/forms/${id}`, { headers: adminHeaders() });
+      if (response.ok) {
+        const saved = (await response.json()) as StoredDetail;
+        upsertLocalForm(saved);
+        setDetail(saved);
+        goToScreen("detail");
+        return;
+      }
+    } catch {
+      // Fall back to the local archive when the server is unavailable.
+    }
+    const local = getLocalForm(id);
+    if (local) {
+      setDetail(local as StoredDetail);
       goToScreen("detail");
     }
   }
 
   async function deleteDetail(id: number) {
     await fetch(`${API_BASE}/api/forms/${id}`, { method: "DELETE", headers: adminHeaders() });
+    removeLocalForm(id);
+    const cache = readHistoryCache();
+    const nextItems = cache.items.filter((item) => item.id !== id);
+    writeHistoryCache(nextItems, Math.max(0, cache.total - (cache.items.some((item) => item.id === id) ? 1 : 0)));
     setDetail(null);
     await loadHistory(true);
   }
@@ -810,7 +883,7 @@ function Header({ scannedCount, onHistory }: { scannedCount: number; onHistory: 
   return (
     <header className="topbar">
       <div>
-        <div className="title">Demo Tarama</div>
+        <div className="title">anket-tarama</div>
         <div className="counter">Taranan: {scannedCount}</div>
       </div>
       <button className="ghost-button" onClick={onHistory}>
@@ -1058,7 +1131,6 @@ function HistoryScreen({
                 <tr>
                   <th>Kayıt</th>
                   <th>Tarih</th>
-                  <th>Güven</th>
                   <th>Boş</th>
                   <th>Manuel</th>
                 </tr>
@@ -1071,7 +1143,6 @@ function HistoryScreen({
                       {form.possibleDuplicate ? " *" : ""}
                     </td>
                     <td>{new Date(form.createdAt).toLocaleString("tr-TR")}</td>
-                    <td>%{Math.round(form.formConfidence * 100)}</td>
                     <td>{form.blankCount}</td>
                     <td>{form.manualCount}</td>
                   </tr>
@@ -1135,6 +1206,56 @@ function AnswerList({ templateCode, answers, showConfidence = false }: { templat
 
 function adminHeaders(): HeadersInit {
   return ADMIN_TOKEN ? { "X-Admin-Token": ADMIN_TOKEN } : {};
+}
+
+function mergeHistorySummaries(serverItems: StoredSummary[], localItems: StoredSummary[]): StoredSummary[] {
+  const byId = new Map<number, StoredSummary>();
+  for (const item of localItems) {
+    byId.set(item.id, item);
+  }
+  for (const item of serverItems) {
+    byId.set(item.id, item);
+  }
+  return [...byId.values()].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+function resolvedHistoryTotal(serverTotal: number, mergedItems: StoredSummary[]): number {
+  const cachedTotal = readHistoryCache().total;
+  const localTotal = localSummaries().total;
+  return Math.max(serverTotal, cachedTotal, localTotal, mergedItems.length);
+}
+
+function readHistoryCache(): { items: StoredSummary[]; total: number } {
+  try {
+    const raw = localStorage.getItem(HISTORY_CACHE_KEY);
+    if (!raw) {
+      return { items: [], total: Number(localStorage.getItem("demoScannedCount") ?? "0") };
+    }
+    const parsed = JSON.parse(raw) as { items?: StoredSummary[]; total?: number };
+    return { items: parsed.items ?? [], total: parsed.total ?? parsed.items?.length ?? 0 };
+  } catch {
+    return { items: [], total: 0 };
+  }
+}
+
+function writeHistoryCache(items: StoredSummary[], total: number) {
+  localStorage.setItem(HISTORY_CACHE_KEY, JSON.stringify({ items: items.slice(0, 200), total }));
+  localStorage.setItem("demoScannedCount", String(total));
+}
+
+function rememberCachedForm(form: StoredDetail) {
+  const cache = readHistoryCache();
+  const summary: StoredSummary = {
+    id: form.id,
+    createdAt: form.createdAt,
+    formConfidence: form.formConfidence,
+    blankCount: form.blankCount,
+    manualCount: form.manualCount,
+    possibleDuplicate: form.possibleDuplicate
+  };
+  const isNew = cache.items.every((item) => item.id !== form.id);
+  const items = [summary, ...cache.items.filter((item) => item.id !== form.id)];
+  writeHistoryCache(items, isNew ? cache.total + 1 : cache.total);
 }
 
 function isTimeoutError(err: unknown): boolean {

@@ -1,4 +1,5 @@
 {
+  "name": "anket-tarama",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

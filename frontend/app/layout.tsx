@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Anket Tarama",
-  description: "Mobil optik form tarama uygulaması"
+  title: "anket-tarama",
+  description: "Optik form tarama uygulaması"
 };
 
 export const viewport: Viewport = {
