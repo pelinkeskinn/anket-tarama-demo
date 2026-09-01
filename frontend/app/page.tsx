@@ -89,6 +89,7 @@ export default function Page() {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const submittingRef = useRef(false);
+  const autoCaptureRef = useRef(false);
   const previousFrameRef = useRef<Uint8ClampedArray | null>(null);
   const stableFramesRef = useRef(0);
   const frozenFramesRef = useRef(0);
@@ -160,6 +161,12 @@ export default function Page() {
   }, [screen]);
 
   useEffect(() => {
+    if (screen === "scanner" && cameraState === "idle") {
+      void requestCamera();
+    }
+  }, [screen, cameraState]);
+
+  useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState !== "visible" || screenRef.current !== "scanner") {
         return;
@@ -184,12 +191,13 @@ export default function Page() {
     if (cameraState !== "ready" || screen !== "scanner") {
       return;
     }
+    autoCaptureRef.current = false;
     previousFrameRef.current = null;
     stableFramesRef.current = 0;
     frozenFramesRef.current = 0;
     const timer = window.setInterval(() => {
       const video = videoRef.current;
-      if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || submittingRef.current) {
+      if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || submittingRef.current || autoCaptureRef.current) {
         return;
       }
       const check = inspectCameraFrame(video, frameRef.current, previousFrameRef.current);
@@ -239,7 +247,10 @@ export default function Page() {
         return;
       }
       setQuality("ready");
-      setGuidance("Form hazır — TARAT'a dokunun");
+      setGuidance("Form algılandı — otomatik taranıyor");
+      autoCaptureRef.current = true;
+      window.clearInterval(timer);
+      void captureAndAnalyze(true);
     }, CAMERA_CHECK_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [cameraState, screen]);
@@ -325,7 +336,7 @@ export default function Page() {
     );
   }
 
-  async function captureAndAnalyze() {
+  async function captureAndAnalyze(automatic = false) {
     if (!videoRef.current || submittingRef.current) {
       return;
     }
@@ -339,6 +350,8 @@ export default function Page() {
         : null;
     if (blob) {
       await analyzeBlob(blob, { templateHint: "HEALTHY_NUTRITION", guidedCapture: true, fallbackBlob });
+    } else if (automatic) {
+      autoCaptureRef.current = false;
     }
   }
 
@@ -823,14 +836,13 @@ export default function Page() {
       <Header scannedCount={scannedCount} databaseStatus={databaseStatus} onHistory={() => void loadHistory(true)} />
       {screen === "scanner" && (
         <section className="scan">
+          <div className="scan-intro">
+            <strong>Anket tarama</strong>
+            <span>Formu çerçevenin içine yerleştirin; görüntü netleştiğinde tarama otomatik başlar.</span>
+          </div>
           <div className={`camera-shell ${cameraState === "ready" ? "camera-active" : ""}`}>
             {cameraState === "ready" ? (
-              <>
-                <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => void attachCameraStream()} />
-                <button className="camera-close-button" onClick={pauseCamera} aria-label="Kamerayı kapat">
-                  Kamerayı kapat
-                </button>
-              </>
+              <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => void attachCameraStream()} />
             ) : (
               <CameraFallback state={cameraState} onRequest={requestCamera} />
             )}

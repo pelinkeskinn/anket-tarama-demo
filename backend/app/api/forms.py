@@ -14,14 +14,18 @@ from app.auth import require_admin
 from app.database import create_form, delete_form, get_form, iter_form_details, list_forms
 from app.db import get_session
 from app.models import StoredFormCreate, StoredFormDetail, StoredFormPage
-from app.scoring import FREQUENCY_QUESTION_START, SCORE_MAP, answer_score, is_review_cell
+from app.scoring import SCORE_MAP, answer_score, is_review_cell
+from app.template import load_templates
 
 
 router = APIRouter(prefix="/api/forms", tags=["forms"])
 
 REVIEW_FILL = PatternFill("solid", fgColor="F4A261")
-MAX_EXPORT_QUESTIONS = 26
-LEGEND_TEMPLATE = "HEALTHY_NUTRITION_V2"
+CURRENT_TEMPLATE_CODE = "HEALTHY_NUTRITION_V3"
+CURRENT_TEMPLATE = next(template for template in load_templates() if template["templateCode"] == CURRENT_TEMPLATE_CODE)
+CURRENT_QUESTIONS = tuple(CURRENT_TEMPLATE["questions"])
+CURRENT_OPTION_VALUES = ("NEVER", "SOMETIMES", "ALWAYS")
+MAX_EXPORT_QUESTIONS = len(CURRENT_QUESTIONS)
 EMPTY_SCORE_NOTE = "Boş hücre — sayıma dahil edilmez"
 
 
@@ -64,7 +68,7 @@ def export_forms(
         "Boş",
         "Manuel",
         *[
-            f"Soru {number} ({'G' if number < FREQUENCY_QUESTION_START else 'S'})"
+            f"Soru {number}"
             for number in range(1, question_count + 1)
         ],
         "Yanıtlanan Soru Sayısı",
@@ -119,7 +123,8 @@ def export_forms(
     for column in range(4, last_column + 1):
         sheet.column_dimensions[get_column_letter(column)].width = 17
 
-    _write_score_key_sheet(workbook, header_fill, question_count)
+    _write_score_key_sheet(workbook, header_fill)
+    _write_question_sheet(workbook, header_fill)
 
     output = BytesIO()
     workbook.save(output)
@@ -129,28 +134,17 @@ def export_forms(
     return StreamingResponse(output, headers=headers, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
-def _write_score_key_sheet(workbook: Workbook, header_fill: PatternFill, question_count: int) -> None:
+def _write_score_key_sheet(workbook: Workbook, header_fill: PatternFill) -> None:
     sheet = workbook.create_sheet("Puan Anahtarı")
     sheet["A1"] = "Puan Anahtarı"
     sheet["A1"].font = Font(bold=True, size=14)
     sheet.merge_cells("A1:B1")
-    sheet["A2"] = "G = genel sorular, S = sıklık soruları. Belirsiz hücreler 1. sayfada turuncu işaretlenir."
+    sheet["A2"] = "Güncel 15 soruluk anket için puanlama. Belirsiz hücreler kayıt sayfasında turuncu işaretlenir."
     sheet.merge_cells("A2:B2")
-
-    general_end = min(FREQUENCY_QUESTION_START - 1, question_count)
-    frequency_end = max(question_count, FREQUENCY_QUESTION_START)
     _append_legend_table(
         sheet,
         start_row=4,
-        title=f"Genel sorular (Soru 1-{general_end})",
-        sample_question=1,
-        header_fill=header_fill,
-    )
-    _append_legend_table(
-        sheet,
-        start_row=13,
-        title=f"Sıklık soruları (Soru {FREQUENCY_QUESTION_START}-{frequency_end})",
-        sample_question=FREQUENCY_QUESTION_START,
+        title="Soru 1-15",
         header_fill=header_fill,
     )
     sheet.column_dimensions["A"].width = 36
@@ -162,7 +156,6 @@ def _append_legend_table(
     *,
     start_row: int,
     title: str,
-    sample_question: int,
     header_fill: PatternFill,
 ) -> None:
     sheet.cell(start_row, 1, title).font = Font(bold=True)
@@ -175,8 +168,8 @@ def _append_legend_table(
         cell.font = Font(color="FFFFFF", bold=True)
         cell.fill = header_fill
     row = header_row + 1
-    for value in SCORE_MAP:
-        sheet.cell(row, 1, _answer_label_text(LEGEND_TEMPLATE, sample_question, value))
+    for value in CURRENT_OPTION_VALUES:
+        sheet.cell(row, 1, _answer_label_text(CURRENT_TEMPLATE_CODE, 1, value))
         score = SCORE_MAP[value]
         sheet.cell(row, 2, int(score) if score == int(score) else score)
         row += 1
@@ -185,6 +178,28 @@ def _append_legend_table(
     row += 1
     sheet.cell(row, 1, "Belirsiz")
     sheet.cell(row, 2, f"{EMPTY_SCORE_NOTE} (turuncu)")
+
+
+def _write_question_sheet(workbook: Workbook, header_fill: PatternFill) -> None:
+    sheet = workbook.create_sheet("Anket Soruları")
+    sheet.append(["Soru No", "Soru Metni", "Seçenekler"])
+    for cell in sheet[1]:
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    for question in CURRENT_QUESTIONS:
+        option_labels = question["optionLabels"]
+        labels = [str(option_labels[value]) for value in CURRENT_OPTION_VALUES]
+        sheet.append([question["questionNo"], question["questionText"], " / ".join(labels)])
+
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    sheet.column_dimensions["A"].width = 12
+    sheet.column_dimensions["B"].width = 100
+    sheet.column_dimensions["C"].width = 50
+    for row in range(2, sheet.max_row + 1):
+        sheet.cell(row, 2).alignment = Alignment(wrap_text=True, vertical="top")
 
 
 def _answer_label_text(template_code: str, question_no: int, value: str | None) -> str:

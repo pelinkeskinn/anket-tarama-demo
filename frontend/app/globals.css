@@ -127,6 +127,22 @@ button:disabled {
   padding: 14px;
 }
 
+.scan-intro {
+  display: grid;
+  gap: 3px;
+  padding: 2px 2px 0;
+}
+
+.scan-intro strong {
+  font-size: 17px;
+}
+
+.scan-intro span {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
 .camera-shell {
   position: relative;
   flex: 1;
@@ -182,21 +198,6 @@ button:disabled {
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
   font-size: 31px;
-}
-
-.camera-close-button {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  min-height: 36px;
-  padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 999px;
-  background: rgba(17, 24, 28, 0.72);
-  color: white;
-  font-size: 13px;
-  font-weight: 700;
-  backdrop-filter: blur(8px);
 }
 
 .frame {

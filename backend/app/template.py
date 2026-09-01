@@ -82,6 +82,7 @@ def _load_healthy_nutrition_reference(path: Any) -> dict[str, Any]:
             {
                 "questionNo": int(question["questionNo"]),
                 "section": int(question["section"]),
+                "questionText": str(question.get("questionText", f"Soru {question['questionNo']}")),
                 "options": options,
                 "optionLabels": optionLabels,
             }

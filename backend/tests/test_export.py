@@ -71,8 +71,8 @@ def test_numeric_export_scores_and_legend(tmp_path) -> None:  # type: ignore[no-
         sheet = workbook["Anket Kayıtları"]
         assert "Özet" not in workbook.sheetnames
         key_sheet = workbook["Puan Anahtarı"]
-        assert sheet["F1"].value == "Soru 1 (G)"
-        assert sheet["Q1"].value == "Soru 12 (S)"
+        assert sheet["F1"].value == "Soru 1"
+        assert sheet["Q1"].value == "Soru 12"
         assert sheet["F2"].value == SCORE_MAP["NEVER"]
         assert sheet["G2"].value == SCORE_MAP["SOMETIMES"]
         assert sheet["H2"].value == SCORE_MAP["OFTEN"]
@@ -84,17 +84,15 @@ def test_numeric_export_scores_and_legend(tmp_path) -> None:  # type: ignore[no-
         header_values = [cell.value for cell in sheet[1]]
         assert "Güven (%)" not in header_values
         assert "Toplam Puan" not in header_values
-        assert sheet.cell(1, 32).value == "Yanıtlanan Soru Sayısı"
-        assert isinstance(sheet.cell(2, 32).value, (int, float))
+        assert sheet.cell(1, 31).value == "Yanıtlanan Soru Sayısı"
+        assert isinstance(sheet.cell(2, 31).value, (int, float))
         assert key_sheet["A1"].value == "Puan Anahtarı"
-        assert key_sheet["A4"].value == "Genel sorular (Soru 1-11)"
+        assert key_sheet["A4"].value == "Soru 1-15"
         assert key_sheet["A6"].value == "Hiçbir zaman"
         assert key_sheet["B6"].value == int(SCORE_MAP["NEVER"])
-        assert key_sheet["A7"].value == "Ara sıra"
+        assert key_sheet["A7"].value == "Bazen"
         assert key_sheet["B7"].value == int(SCORE_MAP["SOMETIMES"])
-        assert key_sheet["A13"].value == "Sıklık soruları (Soru 12-26)"
-        assert key_sheet["A15"].value == "Hiçbir zaman"
-        assert key_sheet["A16"].value == "1-2 kez/hafta"
+        assert key_sheet["A8"].value == "Her zaman"
         legend_text = " ".join(str(cell.value) for row in key_sheet.iter_rows() for cell in row if cell.value)
         assert "NEVER" not in legend_text
         assert "ALWAYS" not in legend_text
@@ -104,6 +102,9 @@ def test_numeric_export_scores_and_legend(tmp_path) -> None:  # type: ignore[no-
         text_book = load_workbook(BytesIO(text_response.content))
         assert text_book.active["F2"].value == "Hiçbir zaman"
         assert "Puan Anahtarı" in text_book.sheetnames
+        questions_sheet = text_book["Anket Soruları"]
+        assert questions_sheet["A16"].value == 15
+        assert "Tuzlu gıdaları" in questions_sheet["B2"].value
         assert "Özet" not in text_book.sheetnames
     finally:
         app.dependency_overrides.clear()

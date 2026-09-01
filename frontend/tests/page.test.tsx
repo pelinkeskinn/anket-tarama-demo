@@ -61,7 +61,6 @@ async function uploadImage() {
 }
 
 async function makeScannerReady() {
-  await userEvent.click(screen.getByRole("button", { name: /kamerayı başlat/i }));
   await act(async () => {
     await Promise.resolve();
   });
@@ -92,12 +91,11 @@ describe("scanner page", () => {
       value: { getUserMedia: vi.fn(async () => Promise.reject(new Error("denied"))) }
     });
     render(<Page />);
-    await userEvent.click(screen.getByRole("button", { name: /kamerayı başlat/i }));
     expect(await screen.findByText("Form tarayabilmek için kamera izni vermeniz gerekiyor.")).toBeInTheDocument();
     expect(screen.getByText("Kamerayı Başlat")).toBeInTheDocument();
   });
 
-  test("scan button appears after the camera starts", async () => {
+  test("scan button appears when the default camera starts", async () => {
     vi.useFakeTimers();
     render(<Page />);
     expect(screen.queryByText("TARAT")).not.toBeInTheDocument();
