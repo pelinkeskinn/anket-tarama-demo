@@ -82,18 +82,7 @@ const labels: Record<AnswerValue | AnswerStatus, string> = {
   AMBIGUOUS: "Kararsız"
 };
 
-const demoForms = [
-  ["filled-clean-v2.png", "V2 profesyonel form"],
-  ["filled-faint-v2.png", "V2 soluk işaretli form"],
-  ["filled-clean.png", "Temiz form"],
-  ["filled-with-blanks.png", "Boş cevaplı form"],
-  ["filled-double-mark.png", "Çift işaretli form"],
-  ["filled-faint-marks.png", "Soluk işaretli form"],
-  ["filled-erased-mark.png", "Silgi izli form"],
-  ["filled-perspective.png", "Perspektifli form"],
-  ["filled-shadow.png", "Gölgeli form"],
-  ["filled-blurry.png", "Bulanık form"]
-] as const;
+type DatabaseStatus = "checking" | "connected" | "unavailable";
 
 export default function Page() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -117,11 +106,13 @@ export default function Page() {
   const [finalAnalysis, setFinalAnalysis] = useState<Analysis | null>(null);
   const [manualSelections, setManualSelections] = useState<Record<number, AnswerValue>>({});
   const [scannedCount, setScannedCount] = useState(0);
+  const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus>("checking");
   const [error, setError] = useState("");
-  const [demoName, setDemoName] = useState<string>(demoForms[0][0]);
   const [history, setHistory] = useState<StoredSummary[]>([]);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [deletingHistory, setDeletingHistory] = useState(false);
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<Set<number>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [detail, setDetail] = useState<StoredDetail | null>(null);
   const [pendingDuplicate, setPendingDuplicate] = useState<Analysis | null>(null);
@@ -141,17 +132,11 @@ export default function Page() {
   useEffect(() => {
     const cache = readHistoryCache();
     const local = localSummaries();
-    const initialTotal = Math.max(
-      cache.total,
-      local.total,
-      Number(localStorage.getItem("demoScannedCount") ?? "0")
-    );
-    setScannedCount(initialTotal);
     if (local.items.length > 0 && cache.items.length === 0) {
-      writeHistoryCache(mergeHistorySummaries([], local.items), initialTotal);
+      writeHistoryCache(mergeHistorySummaries([], local.items), cache.total);
     }
     replaceAppScreen("scanner");
-    void refreshRecordCount();
+    void refreshDatabaseState();
     if (!window.isSecureContext) {
       setCameraState("insecure");
     }
@@ -587,7 +572,7 @@ export default function Page() {
       })
     });
     if (!response.ok) {
-      setError("Cevaplar SQLite veritabanına kaydedilemedi.");
+      setError("Cevaplar veritabanına kaydedilemedi.");
       goToScreen("fatal");
       return;
     }
@@ -597,9 +582,8 @@ export default function Page() {
     setFinalAnalysis(payload);
     rememberCachedForm(saved);
     upsertLocalForm(saved);
-    setScannedCount(readHistoryCache().total);
     goToScreen("success");
-    void refreshRecordCount();
+    void refreshDatabaseState();
   }
 
   function retryFromReview() {
@@ -619,13 +603,10 @@ export default function Page() {
     setPendingDuplicate(null);
     setManualSelections({});
     goToScreen("scanner", "replace");
+    void refreshDatabaseState();
   }
 
   function nextForm() {
-    const cachedTotal = readHistoryCache().total;
-    const nextCount = Math.max(scannedCount + 1, cachedTotal);
-    localStorage.setItem("demoScannedCount", String(nextCount));
-    setScannedCount(nextCount);
     setAnalysis(null);
     setFinalAnalysis(null);
     setPendingDuplicate(null);
@@ -635,17 +616,7 @@ export default function Page() {
     setGuidance("Taranan formu kaldırın");
     goToScreen("scanner", "replace");
     window.setTimeout(() => setGuidance("Yeni formu yerleştirin"), 1800);
-    void refreshRecordCount();
-  }
-
-  async function scanDemoImage() {
-    const response = await fetch(`${API_BASE}/api/demo/sample-forms/${demoName}`);
-    if (!response.ok) {
-      setError("Demo görsel yüklenemedi.");
-      goToScreen("fatal");
-      return;
-    }
-    await analyzeBlob(await response.blob());
+    void refreshDatabaseState();
   }
 
   async function uploadTestImage(event: ChangeEvent<HTMLInputElement>) {
@@ -653,6 +624,23 @@ export default function Page() {
     if (file) {
       await analyzeBlob(file);
       event.target.value = "";
+    }
+  }
+
+  async function refreshDatabaseState() {
+    try {
+      const response = await fetch(`${API_BASE}/readyz`, { cache: "no-store" });
+      const payload = (await response.json()) as { status?: string; database?: string };
+      // Older deployed backends return only { status: "ready" }. That endpoint
+      // still runs SELECT 1, so it is a valid database-connection confirmation.
+      if (!response.ok || payload.status !== "ready" || (payload.database != null && payload.database !== "connected")) {
+        setDatabaseStatus("unavailable");
+        return;
+      }
+      setDatabaseStatus("connected");
+      await refreshRecordCount();
+    } catch {
+      setDatabaseStatus("unavailable");
     }
   }
 
@@ -667,13 +655,13 @@ export default function Page() {
         const cache = readHistoryCache();
         const local = localSummaries();
         const mergedItems = mergeHistorySummaries(cache.items, local.items);
-        const total = resolvedHistoryTotal(payload.total, mergedItems);
+        const total = payload.total;
         setScannedCount(total);
         localStorage.setItem("demoScannedCount", String(total));
         writeHistoryCache(mergedItems, total);
       }
     } catch {
-      // Keep the last known local count if the server is waking up.
+      setDatabaseStatus("unavailable");
     }
   }
 
@@ -697,14 +685,14 @@ export default function Page() {
       const payload = (await response.json()) as StoredSummary[] | { items: StoredSummary[]; total: number };
       const serverItems = Array.isArray(payload) ? payload : payload.items ?? [];
       const serverTotal = Array.isArray(payload) ? payload.length : payload.total ?? serverItems.length;
-      const local = localSummaries();
       const nextItems = reset
-        ? mergeHistorySummaries(serverItems, local.items)
-        : mergeHistorySummaries([...history, ...serverItems], local.items);
-      const total = resolvedHistoryTotal(serverTotal, nextItems);
+        ? serverItems
+        : mergeHistorySummaries([...history, ...serverItems], []);
+      const total = serverTotal;
       setHistory(nextItems);
       setHistoryTotal(total);
       setScannedCount(total);
+      setSelectedHistoryIds((current) => new Set([...current].filter((id) => nextItems.some((item) => item.id === id))));
       writeHistoryCache(nextItems, total);
       if (screenRef.current === "history") {
         goToScreen("history", "silent");
@@ -752,6 +740,34 @@ export default function Page() {
     await loadHistory(true);
   }
 
+  async function deleteHistoryRecords(ids: number[]) {
+    if (ids.length === 0 || deletingHistory) return;
+
+    setDeletingHistory(true);
+    try {
+      const results = await Promise.all(
+        ids.map(async (id) => ({
+          id,
+          response: await fetch(`${API_BASE}/api/forms/${id}`, { method: "DELETE", headers: adminHeaders() })
+        }))
+      );
+      const deletedIds = results.filter(({ response }) => response.ok).map(({ id }) => id);
+      if (deletedIds.length === 0) throw new Error("No records were deleted");
+
+      for (const id of deletedIds) removeLocalForm(id);
+      const cache = readHistoryCache();
+      const nextItems = cache.items.filter((item) => !deletedIds.includes(item.id));
+      writeHistoryCache(nextItems, Math.max(0, cache.total - deletedIds.length));
+      setSelectedHistoryIds(new Set());
+      if (deletedIds.length !== ids.length) setError("Bazı kayıtlar silinemedi.");
+      await loadHistory(true);
+    } catch {
+      setError("Seçilen kayıtlar silinemedi.");
+    } finally {
+      setDeletingHistory(false);
+    }
+  }
+
   async function exportExcel(format: "numeric" | "text" = "numeric") {
     setExporting(true);
     try {
@@ -777,6 +793,7 @@ export default function Page() {
     return (
       <HistoryScreen
         scannedCount={scannedCount}
+        databaseStatus={databaseStatus}
         forms={history}
         total={historyTotal}
         loading={historyLoading}
@@ -785,17 +802,33 @@ export default function Page() {
         onOpen={openDetail}
         onExport={exportExcel}
         onLoadMore={() => void loadHistory(false)}
+        selectedIds={selectedHistoryIds}
+        deleting={deletingHistory}
+        onToggleSelection={(id) =>
+          setSelectedHistoryIds((current) => {
+            const next = new Set(current);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+          })
+        }
+        onToggleAll={() =>
+          setSelectedHistoryIds((current) =>
+            current.size === history.length ? new Set() : new Set(history.map((form) => form.id))
+          )
+        }
+        onDeleteSelected={() => void deleteHistoryRecords([...selectedHistoryIds])}
       />
     );
   }
 
   if (screen === "detail" && detail) {
-    return <DetailScreen scannedCount={scannedCount} detail={detail} onBack={() => void loadHistory(true)} onDelete={deleteDetail} />;
+    return <DetailScreen scannedCount={scannedCount} databaseStatus={databaseStatus} detail={detail} onBack={() => void loadHistory(true)} onDelete={deleteDetail} />;
   }
 
   return (
     <main className="app">
-      <Header scannedCount={scannedCount} onHistory={() => void loadHistory(true)} />
+      <Header scannedCount={scannedCount} databaseStatus={databaseStatus} onHistory={() => void loadHistory(true)} />
       {screen === "scanner" && (
         <section className="scan">
           <div className="camera-shell">
@@ -824,21 +857,6 @@ export default function Page() {
               <span className="upload-copy">Bilgisayarındaki veya telefonundaki form fotoğrafını seçip doğrudan analiz et.</span>
               <span className="upload-action">Fotoğraf Seç</span>
             </label>
-            <details className="demo-tools">
-              <summary>Demo Görseller</summary>
-              <div className="demo-grid">
-                <select value={demoName} onChange={(event) => setDemoName(event.target.value)}>
-                  {demoForms.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-                <button className="secondary-button" onClick={scanDemoImage}>
-                  Demo Görselini Tara
-                </button>
-              </div>
-            </details>
           </div>
         </section>
       )}
@@ -879,12 +897,23 @@ export default function Page() {
   );
 }
 
-function Header({ scannedCount, onHistory }: { scannedCount: number; onHistory: () => void }) {
+function Header({
+  scannedCount,
+  databaseStatus = "checking",
+  onHistory
+}: {
+  scannedCount: number;
+  databaseStatus?: DatabaseStatus;
+  onHistory: () => void;
+}) {
+  const databaseLabel =
+    databaseStatus === "connected" ? "Veritabanı: Bağlı" : databaseStatus === "unavailable" ? "Veritabanı: Bağlantı yok" : "Veritabanı: Kontrol ediliyor…";
   return (
     <header className="topbar">
       <div>
         <div className="title">anket-tarama</div>
         <div className="counter">Taranan: {scannedCount}</div>
+        <div className={`database-status ${databaseStatus}`}>{databaseLabel}</div>
       </div>
       <button className="ghost-button" onClick={onHistory}>
         Geçmiş Taramalar
@@ -1094,6 +1123,7 @@ function SuccessScreen({ analysis, onNext, onDiscard }: { analysis: Analysis; on
 
 function HistoryScreen({
   scannedCount,
+  databaseStatus,
   forms,
   total,
   loading,
@@ -1101,9 +1131,15 @@ function HistoryScreen({
   onBack,
   onOpen,
   onExport,
-  onLoadMore
+  onLoadMore,
+  selectedIds,
+  deleting,
+  onToggleSelection,
+  onToggleAll,
+  onDeleteSelected
 }: {
   scannedCount: number;
+  databaseStatus: DatabaseStatus;
   forms: StoredSummary[];
   total: number;
   loading: boolean;
@@ -1112,10 +1148,16 @@ function HistoryScreen({
   onOpen: (id: number) => void;
   onExport: (format: "numeric" | "text") => void;
   onLoadMore: () => void;
+  selectedIds: Set<number>;
+  deleting: boolean;
+  onToggleSelection: (id: number) => void;
+  onToggleAll: () => void;
+  onDeleteSelected: () => void;
 }) {
+  const allSelected = forms.length > 0 && selectedIds.size === forms.length;
   return (
     <main className="app">
-      <Header scannedCount={scannedCount} onHistory={onBack} />
+      <Header scannedCount={scannedCount} databaseStatus={databaseStatus} onHistory={onBack} />
       <section className="screen">
         <div className="status-title">Geçmiş Taramalar</div>
         {exporting && <div className="panel">Excel hazırlanıyor…</div>}
@@ -1127,12 +1169,20 @@ function HistoryScreen({
             EXCEL'E AKTAR (metin)
           </button>
         </div>
+        {forms.length > 0 && (
+          <button className="danger-button" onClick={onDeleteSelected} disabled={selectedIds.size === 0 || deleting}>
+            {deleting ? "Kayıtlar siliniyor…" : `Seçilenleri sil (${selectedIds.size})`}
+          </button>
+        )}
         {forms.length === 0 && <div className="panel">Kayıt bulunamadı.</div>}
         {forms.length > 0 && (
           <div className="history-table-wrap">
             <table className="history-table">
               <thead>
                 <tr>
+                  <th className="history-select-cell">
+                    <input aria-label="Tüm kayıtları seç" type="checkbox" checked={allSelected} onChange={onToggleAll} />
+                  </th>
                   <th>Kayıt</th>
                   <th>Tarih</th>
                   <th>Boş</th>
@@ -1142,6 +1192,14 @@ function HistoryScreen({
               <tbody>
                 {forms.map((form) => (
                   <tr key={form.id} onClick={() => onOpen(form.id)} tabIndex={0}>
+                    <td className="history-select-cell" onClick={(event) => event.stopPropagation()}>
+                      <input
+                        aria-label={`Kayıt #${form.id} seç`}
+                        type="checkbox"
+                        checked={selectedIds.has(form.id)}
+                        onChange={() => onToggleSelection(form.id)}
+                      />
+                    </td>
                     <td>
                       #{form.id}
                       {form.possibleDuplicate ? " *" : ""}
@@ -1168,10 +1226,22 @@ function HistoryScreen({
   );
 }
 
-function DetailScreen({ scannedCount, detail, onBack, onDelete }: { scannedCount: number; detail: StoredDetail; onBack: () => void; onDelete: (id: number) => void }) {
+function DetailScreen({
+  scannedCount,
+  databaseStatus,
+  detail,
+  onBack,
+  onDelete
+}: {
+  scannedCount: number;
+  databaseStatus: DatabaseStatus;
+  detail: StoredDetail;
+  onBack: () => void;
+  onDelete: (id: number) => void;
+}) {
   return (
     <main className="app">
-      <Header scannedCount={scannedCount} onHistory={onBack} />
+      <Header scannedCount={scannedCount} databaseStatus={databaseStatus} onHistory={onBack} />
       <section className="screen">
         <div className="panel stack">
           <div className="status-title">Form #{detail.id}</div>
@@ -1221,12 +1291,6 @@ function mergeHistorySummaries(serverItems: StoredSummary[], localItems: StoredS
     byId.set(item.id, item);
   }
   return [...byId.values()].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-}
-
-function resolvedHistoryTotal(serverTotal: number, mergedItems: StoredSummary[]): number {
-  const cachedTotal = readHistoryCache().total;
-  const localTotal = localSummaries().total;
-  return Math.max(serverTotal, cachedTotal, localTotal, mergedItems.length);
 }
 
 function readHistoryCache(): { items: StoredSummary[]; total: number } {

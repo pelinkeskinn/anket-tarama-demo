@@ -71,6 +71,24 @@ button:disabled {
   font-weight: 700;
 }
 
+.database-status {
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.database-status.checking {
+  color: var(--muted);
+}
+
+.database-status.connected {
+  color: var(--green);
+}
+
+.database-status.unavailable {
+  color: var(--red);
+}
+
 .ghost-button,
 .secondary-button,
 .danger-button,
@@ -468,6 +486,18 @@ button:disabled {
 .history-table th {
   background: #f4f6f7;
   font-size: 13px;
+}
+
+.history-select-cell {
+  width: 36px;
+  padding-right: 0 !important;
+  text-align: center !important;
+}
+
+.history-select-cell input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--brand);
 }
 
 .history-table tbody tr {

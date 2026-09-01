@@ -34,7 +34,7 @@ def test_production_closes_openapi(monkeypatch) -> None:  # type: ignore[no-unty
 def test_readiness_checks_database() -> None:
     response = client.get("/readyz")
     assert response.status_code == 200
-    assert response.json() == {"status": "ready"}
+    assert response.json() == {"status": "ready", "database": "connected"}
 
 
 def test_render_origin_is_allowed() -> None:

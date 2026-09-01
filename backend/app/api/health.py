@@ -21,5 +21,5 @@ def readiness() -> dict[str, str]:
         with SessionLocal() as session:
             session.execute(text("SELECT 1"))
     except SQLAlchemyError as exc:
-        raise HTTPException(status_code=503, detail={"status": "not_ready"}) from exc
-    return {"status": "ready"}
+        raise HTTPException(status_code=503, detail={"status": "not_ready", "database": "unavailable"}) from exc
+    return {"status": "ready", "database": "connected"}

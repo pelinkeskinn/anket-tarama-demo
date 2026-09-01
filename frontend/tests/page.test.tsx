@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -30,8 +30,14 @@ function mockFetchAnalysis(payload: unknown) {
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
-    if (url.includes("/healthz") || url.includes("/readyz")) {
+    if (url.includes("/healthz")) {
       return new Response(JSON.stringify({ status: "ok" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.includes("/readyz")) {
+      return new Response(JSON.stringify({ status: "ready", database: "connected" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
     }
     if (url.includes("/api/omr/analyze")) {
       return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -252,14 +258,6 @@ describe("scanner page", () => {
       await Promise.resolve();
     });
     expect(global.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  test("demo image loading triggers analysis", async () => {
-    mockFetchAnalysis(cleanAnalysis());
-    render(<Page />);
-    fireEvent.click(screen.getByText("Demo Görseller"));
-    fireEvent.click(screen.getByText("Demo Görselini Tara"));
-    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining("/api/demo/sample-forms/filled-clean-v2.png")));
   });
 
   test("browser back from history returns to scanner", async () => {
