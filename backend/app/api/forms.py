@@ -54,10 +54,11 @@ def export_forms(
     _: None = Depends(require_admin),
     format: Literal["numeric", "text"] = Query(default="numeric"),
 ) -> StreamingResponse:
-    forms = list(iter_form_details(session))
-    question_count = max(
-        [MAX_EXPORT_QUESTIONS, *[max((answer.questionNo for answer in form.answers), default=0) for form in forms]]
-    )
+    # The export is the report for the currently deployed Kızılay form.
+    # Historical calibrations used a different number of choices and cannot be
+    # meaningfully mixed into this three-choice report.
+    forms = [form for form in iter_form_details(session) if form.templateCode == CURRENT_TEMPLATE_CODE]
+    question_count = MAX_EXPORT_QUESTIONS
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Anket Kayıtları"

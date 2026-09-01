@@ -28,16 +28,16 @@ def _override_db(tmp_path):  # type: ignore[no-untyped-def]
 
 
 def _answers() -> list[AnswerResult]:
-    values = ["NEVER", "SOMETIMES", "OFTEN", "ALWAYS", "BLANK"]
-    statuses = ["OK", "OK", "OK", "OK", "BLANK"]
+    values = ["NEVER", "SOMETIMES", "ALWAYS", "BLANK"]
+    statuses = ["MARKED", "MARKED", "MARKED", "BLANK"]
     answers = []
-    for question_no in range(1, 26):
+    for question_no in range(1, 16):
         if question_no == 6:
             answers.append(
                 AnswerResult(questionNo=6, value=None, confidence=0.4, source="UNRESOLVED", status="UNCERTAIN")
             )
             continue
-        index = (question_no - 1) % 5
+        index = (question_no - 1) % 4
         answers.append(
             AnswerResult(
                 questionNo=question_no,
@@ -56,7 +56,7 @@ def test_numeric_export_scores_and_legend(tmp_path) -> None:  # type: ignore[no-
         create_form(
             StoredFormCreate(
                 analysisId="export-1",
-                templateCode="OMR_SURVEY_V2",
+                templateCode="HEALTHY_NUTRITION_V3",
                 formConfidence=0.9,
                 answers=_answers(),
             ),
@@ -75,17 +75,16 @@ def test_numeric_export_scores_and_legend(tmp_path) -> None:  # type: ignore[no-
         assert sheet["Q1"].value == "Soru 12"
         assert sheet["F2"].value == SCORE_MAP["NEVER"]
         assert sheet["G2"].value == SCORE_MAP["SOMETIMES"]
-        assert sheet["H2"].value == SCORE_MAP["OFTEN"]
-        assert sheet["I2"].value == SCORE_MAP["ALWAYS"]
-        assert sheet["J2"].value is None
+        assert sheet["H2"].value == SCORE_MAP["ALWAYS"]
+        assert sheet["I2"].value is None
         assert sheet["K2"].value is None
         fill = str(sheet["K2"].fill.fgColor.rgb or sheet["K2"].fill.fgColor.theme)
         assert "F4A261" in fill.upper() or sheet["K2"].fill.patternType == "solid"
         header_values = [cell.value for cell in sheet[1]]
         assert "Güven (%)" not in header_values
         assert "Toplam Puan" not in header_values
-        assert sheet.cell(1, 31).value == "Yanıtlanan Soru Sayısı"
-        assert isinstance(sheet.cell(2, 31).value, (int, float))
+        assert sheet.cell(1, 21).value == "Yanıtlanan Soru Sayısı"
+        assert isinstance(sheet.cell(2, 21).value, (int, float))
         assert key_sheet["A1"].value == "Puan Anahtarı"
         assert key_sheet["A4"].value == "Soru 1-15"
         assert key_sheet["A6"].value == "Hiçbir zaman"
@@ -117,7 +116,7 @@ def test_forms_list_is_paginated(tmp_path) -> None:  # type: ignore[no-untyped-d
             create_form(
                 StoredFormCreate(
                     analysisId=f"page-{index}",
-                    templateCode="OMR_SURVEY_V2",
+                        templateCode="HEALTHY_NUTRITION_V3",
                     formConfidence=0.9,
                     answers=_answers(),
                 ),
