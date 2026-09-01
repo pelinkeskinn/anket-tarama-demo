@@ -177,6 +177,42 @@ button:disabled {
   border-color: var(--red);
 }
 
+.scan-sweep {
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  height: 3px;
+  top: 8%;
+  border-radius: 999px;
+  background: rgba(79, 224, 163, 0.95);
+  box-shadow: 0 0 14px rgba(79, 224, 163, 0.9);
+  animation: scan-sweep 2.3s ease-in-out infinite;
+}
+
+.frame.bad .scan-sweep {
+  background: rgba(255, 183, 77, 0.95);
+  box-shadow: 0 0 14px rgba(255, 183, 77, 0.8);
+}
+
+.scan-focus-label {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(10, 17, 20, 0.72);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@keyframes scan-sweep {
+  0%, 100% { top: 10%; opacity: 0.35; }
+  50% { top: 88%; opacity: 1; }
+}
+
 .corner {
   position: absolute;
   width: 34px;

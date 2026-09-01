@@ -53,7 +53,10 @@ def analyze_image_bytes(
     is_guided_nutrition_scan = template_hint == "HEALTHY_NUTRITION"
     if is_pdf or is_guided_nutrition_scan:
         templates = [template for template in templates if is_healthy_template(template)]
-    healthy_match_threshold = 0.18 if guided_capture and is_guided_nutrition_scan else 0.30 if is_guided_nutrition_scan else 0.68
+    # Use the score to pick the best matching revision instead of rejecting a
+    # usable camera photograph merely because its lighting or filled circles
+    # lower the absolute score. Guided crops remain the most permissive.
+    healthy_match_threshold = 0.18 if guided_capture and is_guided_nutrition_scan else 0.30 if is_guided_nutrition_scan else 0.48
     # PDF pages are rasterized by their page coordinate system and are already
     # upright. Trying four rotations multiplies Render CPU time and can push a
     # valid request beyond the reverse proxy timeout.
@@ -629,19 +632,24 @@ def _find_page_corners(image: np.ndarray, target_aspect: float) -> np.ndarray:
     _, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     image_area = width * height
     candidates: list[tuple[float, np.ndarray]] = []
-    for thresholded in (otsu, adaptive):
+    # Threshold contours work well on black/white surrounds.  Edge contours
+    # add a colour- and brightness-independent fallback for desks, patterns,
+    # and a second sheet visible behind the form.
+    edges = cv2.Canny(blurred, 35, 120)
+    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8), iterations=2)
+    for thresholded in (otsu, adaptive, edges):
         contours, _ = cv2.findContours(thresholded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:12]:
+        for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:20]:
             area = float(cv2.contourArea(contour))
-            if not image_area * 0.08 <= area <= image_area * 0.98:
+            if not image_area * 0.04 <= area <= image_area * 0.995:
                 continue
             perimeter = cv2.arcLength(contour, True)
-            polygon = cv2.approxPolyDP(contour, 0.025 * perimeter, True)
+            polygon = cv2.approxPolyDP(contour, 0.035 * perimeter, True)
             if len(polygon) != 4 or not cv2.isContourConvex(polygon):
                 continue
             ordered = _order_points(polygon.reshape(4, 2).astype(np.float32))
             aspect_error = abs(_quadrilateral_aspect(ordered) - target_aspect) / target_aspect
-            if aspect_error <= 0.35 and _has_consistent_edges(ordered):
+            if aspect_error <= 0.42 and _has_consistent_edges(ordered):
                 candidates.append((area * (1.0 - aspect_error), ordered))
     if candidates:
         return max(candidates, key=lambda item: item[0])[1]

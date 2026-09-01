@@ -233,6 +233,38 @@ def test_two_filled_options_are_multiple() -> None:
     assert answer.value is None
 
 
+def test_overfilled_single_option_is_not_mistaken_for_multiple() -> None:
+    question = healthy_template()["questions"][0]
+    overflow_image, overflow_box = marked_roi("blank")
+    # Deliberately cross the printed bubble boundary: the inner area is still
+    # one clear answer and must beat a weaker neighbouring spill.
+    cv2.circle(overflow_image, (50, 50), 37, 50, -1)
+    spill_image, spill_box = marked_roi("blank")
+    cv2.circle(spill_image, (50, 50), 20, 160, -1)
+    blank_image, blank_box = marked_roi("blank")
+    overflow = calculate_fill_features(overflow_image, overflow_box)
+    spill = calculate_fill_features(spill_image, spill_box)
+    blank = calculate_fill_features(blank_image, blank_box)
+
+    answer = evaluate_question(question, [overflow, spill, blank, blank])
+
+    assert answer.status == "MARKED"
+    assert answer.value == "NEVER"
+
+
+def test_faint_fill_is_not_accepted_as_a_deliberate_answer() -> None:
+    question = healthy_template()["questions"][0]
+    faint_image, faint_box = marked_roi("blank")
+    cv2.circle(faint_image, (50, 50), 14, 228, -1)
+    blank_image, blank_box = marked_roi("blank")
+    faint = calculate_fill_features(faint_image, faint_box)
+    blank = calculate_fill_features(blank_image, blank_box)
+
+    answer = evaluate_question(question, [faint, blank, blank, blank])
+
+    assert answer.value != "NEVER"
+
+
 def test_two_irregular_marks_are_multiple() -> None:
     question = healthy_template()["questions"][0]
     tick_image, tick_box = marked_roi("tick")

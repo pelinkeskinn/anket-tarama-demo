@@ -219,7 +219,10 @@ export default function Page() {
         setGuidance("Ortam çok karanlık — ışığı artırın");
         return;
       }
-      if (check.paperRatio < 0.28) {
+      // The page may occupy less of the frame on a coloured desk or when a
+      // second sheet is visible.  Backend page/marker detection makes the
+      // final decision, so keep the live camera gate deliberately permissive.
+      if (check.paperRatio < 0.16) {
         stableFramesRef.current = 0;
         setQuality("bad");
         setGuidance("Formun tamamını çerçevenin içine alın");
@@ -417,7 +420,9 @@ export default function Page() {
       };
 
       let response = await postAnalysis(blob, options.guidedCapture);
-      if (!response.ok && options.fallbackBlob) response = await postAnalysis(options.fallbackBlob);
+      // The guided crop is fast, but a partly covered/stacked sheet may extend
+      // beyond it. Retry the full camera frame with page/marker detection.
+      if (!response.ok && options.fallbackBlob) response = await postAnalysis(options.fallbackBlob, false);
       if (!isCurrentAnalyzeRequest(requestId)) {
         return;
       }
@@ -842,6 +847,8 @@ export default function Page() {
               <span className="corner tr" />
               <span className="corner br" />
               <span className="corner bl" />
+              <span className="scan-sweep" aria-hidden="true" />
+              <span className="scan-focus-label">Taranan alan</span>
             </div>
             <div className="guidance">{cameraState === "ready" ? guidance : "Forma dokunarak odaklayın"}</div>
             <div className="cold-start-note">Ücretsiz sunucu planı nedeniyle ilk tarama daha uzun sürebilir.</div>

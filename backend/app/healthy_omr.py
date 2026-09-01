@@ -12,11 +12,13 @@ from app.models import AnswerResult
 
 TEMPLATE_CODE_PREFIX = "HEALTHY_NUTRITION_V"
 OPTION_ORDER = ("NEVER", "SOMETIMES", "OFTEN", "ALWAYS")
-MARK_SCORE_THRESHOLD = 0.65
+MARK_SCORE_THRESHOLD = 0.62
 AMBIGUOUS_SCORE_THRESHOLD = 0.38
-MIN_INK_RATIO = 0.055
-CLEAR_HAND_MARK_SCORE = 0.14
-CLEAR_HAND_MARK_MARGIN = 0.06
+# A weak pencil trace or a shadow must not become an answer.  Strong, broad
+# fills (including fills that overflow the printed circle) are accepted below.
+MIN_INK_RATIO = 0.075
+CLEAR_HAND_MARK_SCORE = 0.18
+CLEAR_HAND_MARK_MARGIN = 0.08
 
 
 @dataclass(frozen=True)
@@ -145,13 +147,22 @@ def evaluate_question(
         "scores": scores,
         "optionLabels": [str(question["optionLabels"][option]) for option in options],
     }
-    if len(filled) >= 2:
+    if _has_independent_multiple_fill(features, filled):
         confidence = min(0.99, 0.72 + min(scores[index] for index in filled) * 0.25)
         return AnswerResult(value=None, confidence=round(confidence, 3), source="UNRESOLVED", status="MULTIPLE", **common)
 
-    if len(filled) == 1:
-        selected_index = filled[0]
-        competing_ink = [index for index in inked if index != selected_index and scores[index] >= AMBIGUOUS_SCORE_THRESHOLD]
+    if filled:
+        # Ink which bleeds beyond a strongly filled circle can partially enter
+        # its neighbour.  Preserve the dominant answer unless both circles are
+        # independently and comparably filled.
+        selected_index = max(filled, key=lambda index: scores[index])
+        competing_ink = [
+            index
+            for index in inked
+            if index != selected_index
+            and scores[index] >= AMBIGUOUS_SCORE_THRESHOLD
+            and scores[selected_index] - scores[index] < 0.14
+        ]
         if competing_ink:
             return AnswerResult(value=None, confidence=0.5, source="UNRESOLVED", status="AMBIGUOUS", **common)
         option = options[selected_index]
@@ -171,12 +182,12 @@ def evaluate_question(
     # Respondents do not always fill a bubble completely. A single, clearly
     # dominant tick, cross, slash, dot or partial fill still expresses an
     # unambiguous choice and should not make the whole form fail review.
-    if len(hand_marked) >= 2:
+    if _has_independent_multiple_fill(features, hand_marked):
         confidence = min(0.99, 0.68 + min(scores[index] for index in hand_marked) * 0.25)
         return AnswerResult(value=None, confidence=round(confidence, 3), source="UNRESOLVED", status="MULTIPLE", **common)
 
-    if len(hand_marked) == 1:
-        selected_index = hand_marked[0]
+    if hand_marked:
+        selected_index = max(hand_marked, key=lambda index: scores[index])
         runner_up = max(score for index, score in enumerate(scores) if index != selected_index)
         margin = scores[selected_index] - runner_up
         if margin >= CLEAR_HAND_MARK_MARGIN:
@@ -216,10 +227,37 @@ def _is_clear_hand_mark(feature: FillFeatures) -> bool:
         feature.is_filled
         or (
             feature.score >= CLEAR_HAND_MARK_SCORE
-            and feature.inner_dark_ratio >= 0.10
-            and feature.connected_component_ratio >= 0.10
-            and (feature.center_dark_ratio >= 0.10 or max(feature.quadrant_coverage) >= 0.25)
+            and feature.inner_dark_ratio >= 0.14
+            and feature.connected_component_ratio >= 0.12
+            and (feature.center_dark_ratio >= 0.13 or max(feature.quadrant_coverage) >= 0.30)
         )
+    )
+
+
+def _has_independent_multiple_fill(features: list[FillFeatures], indexes: list[int]) -> bool:
+    """Require two comparable, centred fills before reporting MULTIPLE.
+
+    This avoids a false multiple-answer warning when a dark overfill spills
+    into the edge of an adjacent bubble or an alignment is off by a few pixels.
+    """
+    if len(indexes) < 2:
+        return False
+    strongest, runner_up = sorted(indexes, key=lambda index: features[index].score, reverse=True)[:2]
+    first = features[strongest]
+    second = features[runner_up]
+    if first.is_filled and second.is_filled:
+        return bool(
+            second.score >= 0.56
+            and second.inner_dark_ratio >= 0.50
+            and second.center_dark_ratio >= 0.42
+            and min(second.quadrant_coverage) >= 0.32
+            and first.score - second.score <= 0.16
+        )
+    return bool(
+        second.score >= CLEAR_HAND_MARK_SCORE
+        and second.inner_dark_ratio >= 0.14
+        and second.connected_component_ratio >= 0.12
+        and first.score - second.score <= 0.12
     )
 
 
@@ -237,7 +275,10 @@ def template_match_score(warped: np.ndarray, template: dict[str, Any]) -> float:
             # aligned answer is a balanced fill.  A displaced printed border
             # cutting through the inner mask looks like an invalid stroke and
             # identifies the wrong form revision.
-            inner_geometry_matches = not features.has_ink or features.is_filled
+            # A valid response can overflow the circle slightly.  The printed
+            # circle itself remains stronger template evidence than the exact
+            # shape of the respondent's fill.
+            inner_geometry_matches = not features.has_ink or features.is_filled or features.inner_dark_ratio >= 0.34
             if _has_printed_circle(gray, box) and inner_geometry_matches:
                 circle_matches += 1
     circle_score = circle_matches / max(total, 1)
