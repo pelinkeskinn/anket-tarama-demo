@@ -14,7 +14,7 @@ from app.auth import require_admin
 from app.database import create_form, delete_form, get_form, iter_form_details, list_forms
 from app.db import get_session
 from app.models import StoredFormCreate, StoredFormDetail, StoredFormPage
-from app.scoring import SCORE_MAP, answer_score, is_review_cell
+from app.scoring import CURRENT_SURVEY_SCORE_MAP, SCORE_MAP, answer_score, is_review_cell
 from app.template import load_templates
 
 
@@ -100,9 +100,9 @@ def export_forms(
             status = answer.status if answer else None
             if format == "text":
                 row_values.append(_answer_label_text(form.templateCode, number, value))
-                score = answer_score(value, status)
+                score = answer_score(value, status, form.templateCode)
             else:
-                score = answer_score(value, status)
+                score = answer_score(value, status, form.templateCode)
                 row_values.append(score)
             if score is not None:
                 scored_values.append(score)
@@ -171,7 +171,7 @@ def _append_legend_table(
     row = header_row + 1
     for value in CURRENT_OPTION_VALUES:
         sheet.cell(row, 1, _answer_label_text(CURRENT_TEMPLATE_CODE, 1, value))
-        score = SCORE_MAP[value]
+        score = CURRENT_SURVEY_SCORE_MAP[value]
         sheet.cell(row, 2, int(score) if score == int(score) else score)
         row += 1
     sheet.cell(row, 1, "Boş")

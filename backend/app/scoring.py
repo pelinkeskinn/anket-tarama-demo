@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-# Likert scoring for Excel export and normalized answers.
-# Confirmed by survey owner: no reverse items; NEVER=1 … ALWAYS=4.
+# Historical four-choice Likert scoring.
 SCORE_MAP: dict[str, float] = {
     "NEVER": 1.0,
     "SOMETIMES": 2.0,
@@ -9,12 +8,20 @@ SCORE_MAP: dict[str, float] = {
     "ALWAYS": 4.0,
 }
 
+# The current Kızılay form has three response choices, not four.
+CURRENT_SURVEY_SCORE_MAP: dict[str, float] = {
+    "NEVER": 1.0,
+    "SOMETIMES": 2.0,
+    "ALWAYS": 3.0,
+}
+
 FREQUENCY_QUESTION_START = 12
 
 
-def answer_score(value: str | None, status: str | None = None) -> float | None:
-    if value in SCORE_MAP:
-        return SCORE_MAP[value]
+def answer_score(value: str | None, status: str | None = None, template_code: str | None = None) -> float | None:
+    score_map = CURRENT_SURVEY_SCORE_MAP if template_code == "HEALTHY_NUTRITION_V3" else SCORE_MAP
+    if value in score_map:
+        return score_map[value]
     return None
 
 

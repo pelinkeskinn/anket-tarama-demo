@@ -55,7 +55,7 @@ def create_form(payload: StoredFormCreate, session: Session | None = None) -> St
         )
         db.add(entity)
         db.flush()
-        _replace_normalized_answers(db, entity.id, payload.answers)
+        _replace_normalized_answers(db, entity.id, payload.answers, payload.templateCode)
         _write_audit(db, "form.create", entity.id, entity.analysis_id, {"templateCode": entity.template_code})
         db.commit()
         db.refresh(entity)
@@ -166,7 +166,7 @@ def _answer_signature_from_json(answers: list[dict[str, object]]) -> str:
     return "|".join(f"{item.get('questionNo')}:{(item.get('value') or '')}" for item in items)
 
 
-def _replace_normalized_answers(db: Session, form_id: int, answers: list[AnswerResult]) -> None:
+def _replace_normalized_answers(db: Session, form_id: int, answers: list[AnswerResult], template_code: str) -> None:
     existing = db.scalars(select(FormAnswer).where(FormAnswer.form_id == form_id)).all()
     for row in existing:
         db.delete(row)
@@ -176,7 +176,7 @@ def _replace_normalized_answers(db: Session, form_id: int, answers: list[AnswerR
                 form_id=form_id,
                 question_no=answer.questionNo,
                 value=answer.value,
-                score=answer_score(answer.value, answer.status),
+                score=answer_score(answer.value, answer.status, template_code),
                 status=answer.status,
                 source=answer.source,
             )

@@ -3,11 +3,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.scoring import SCORE_MAP, answer_score, is_review_cell
+from app.scoring import CURRENT_SURVEY_SCORE_MAP, SCORE_MAP, answer_score, is_review_cell
 
 
 def test_score_map_is_likert_1_to_4() -> None:
     assert SCORE_MAP == {"NEVER": 1.0, "SOMETIMES": 2.0, "OFTEN": 3.0, "ALWAYS": 4.0}
+    assert CURRENT_SURVEY_SCORE_MAP == {"NEVER": 1.0, "SOMETIMES": 2.0, "ALWAYS": 3.0}
+
+
+def test_current_three_choice_survey_scores_always_as_three() -> None:
+    assert answer_score("ALWAYS", template_code="HEALTHY_NUTRITION_V3") == 3.0
 
 
 def test_blank_and_uncertain_are_not_scored() -> None:

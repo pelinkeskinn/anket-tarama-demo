@@ -11,7 +11,7 @@ from app.db import Base, get_session
 from app.main import app
 from app.models import AnswerResult, StoredFormCreate
 from app.database import create_form
-from app.scoring import SCORE_MAP
+from app.scoring import CURRENT_SURVEY_SCORE_MAP, SCORE_MAP
 
 
 def _override_db(tmp_path):  # type: ignore[no-untyped-def]
@@ -73,9 +73,9 @@ def test_numeric_export_scores_and_legend(tmp_path) -> None:  # type: ignore[no-
         key_sheet = workbook["Puan Anahtarı"]
         assert sheet["F1"].value == "Soru 1"
         assert sheet["Q1"].value == "Soru 12"
-        assert sheet["F2"].value == SCORE_MAP["NEVER"]
-        assert sheet["G2"].value == SCORE_MAP["SOMETIMES"]
-        assert sheet["H2"].value == SCORE_MAP["ALWAYS"]
+        assert sheet["F2"].value == CURRENT_SURVEY_SCORE_MAP["NEVER"]
+        assert sheet["G2"].value == CURRENT_SURVEY_SCORE_MAP["SOMETIMES"]
+        assert sheet["H2"].value == CURRENT_SURVEY_SCORE_MAP["ALWAYS"]
         assert sheet["I2"].value is None
         assert sheet["K2"].value is None
         fill = str(sheet["K2"].fill.fgColor.rgb or sheet["K2"].fill.fgColor.theme)
@@ -88,9 +88,10 @@ def test_numeric_export_scores_and_legend(tmp_path) -> None:  # type: ignore[no-
         assert key_sheet["A1"].value == "Puan Anahtarı"
         assert key_sheet["A4"].value == "Soru 1-15"
         assert key_sheet["A6"].value == "Hiçbir zaman"
-        assert key_sheet["B6"].value == int(SCORE_MAP["NEVER"])
+        assert key_sheet["B6"].value == int(CURRENT_SURVEY_SCORE_MAP["NEVER"])
         assert key_sheet["A7"].value == "Bazen"
-        assert key_sheet["B7"].value == int(SCORE_MAP["SOMETIMES"])
+        assert key_sheet["B7"].value == int(CURRENT_SURVEY_SCORE_MAP["SOMETIMES"])
+        assert key_sheet["B8"].value == int(CURRENT_SURVEY_SCORE_MAP["ALWAYS"])
         assert key_sheet["A8"].value == "Her zaman"
         legend_text = " ".join(str(cell.value) for row in key_sheet.iter_rows() for cell in row if cell.value)
         assert "NEVER" not in legend_text
