@@ -959,12 +959,16 @@ const ReviewQuestion = memo(function ReviewQuestion({
   selected?: AnswerValue;
   onSelect: (questionNo: number, value: AnswerValue) => void;
 }) {
+  const selectableValues =
+    answer.optionLabels?.length === 3
+      ? (["NEVER", "SOMETIMES", "ALWAYS", "BLANK"] as const)
+      : (["NEVER", "SOMETIMES", "OFTEN", "ALWAYS", "BLANK"] as const);
   return (
     <div className="panel stack">
       <strong>Soru {answer.questionNo}</strong>
       <span className="muted">{labels[answer.status]}</span>
       <div className="review-options">
-        {(["NEVER", "SOMETIMES", "OFTEN", "ALWAYS", "BLANK"] as const).map((value) => (
+        {selectableValues.map((value) => (
           <button
             key={value}
             className={`option-button ${selected === value ? "selected" : ""}`}
@@ -1312,6 +1316,9 @@ function rememberSequence(payload: Analysis) {
 
 function answerOptionLabel(templateCode: string, questionNo: number, value: AnswerValue): string {
   if (value === "BLANK") return labels.BLANK;
+  if (templateCode === "HEALTHY_NUTRITION_V3") {
+    return ({ NEVER: "Hiçbir zaman", SOMETIMES: "Bazen", OFTEN: "Sık sık", ALWAYS: "Her zaman" } as const)[value];
+  }
   if (templateCode.startsWith("HEALTHY_NUTRITION_V") && questionNo >= 12) {
     return ({ NEVER: "Hiçbir zaman", SOMETIMES: "1-2 kez/hafta", OFTEN: "3-4 kez/hafta", ALWAYS: "5+ kez/hafta" } as const)[value];
   }

@@ -4,7 +4,12 @@ import json
 from functools import lru_cache
 from typing import Any
 
-from app.config import HEALTHY_NUTRITION_TEMPLATE_PATH, HEALTHY_NUTRITION_TEMPLATE_V2_PATH, TEMPLATE_PATH
+from app.config import (
+    HEALTHY_NUTRITION_TEMPLATE_PATH,
+    HEALTHY_NUTRITION_TEMPLATE_V2_PATH,
+    HEALTHY_NUTRITION_TEMPLATE_V3_PATH,
+    TEMPLATE_PATH,
+)
 from app.errors import OmrError
 
 
@@ -43,7 +48,14 @@ def _v2_option_box(center_x: int, center_y: int, size: int = 130) -> dict[str, i
 @lru_cache
 def _healthy_nutrition_reference_templates() -> tuple[dict[str, Any], ...]:
     """Load one-time calibrations extracted from the canonical PDF revisions."""
-    return tuple(_load_healthy_nutrition_reference(path) for path in (HEALTHY_NUTRITION_TEMPLATE_V2_PATH, HEALTHY_NUTRITION_TEMPLATE_PATH))
+    return tuple(
+        _load_healthy_nutrition_reference(path)
+        for path in (
+            HEALTHY_NUTRITION_TEMPLATE_V3_PATH,
+            HEALTHY_NUTRITION_TEMPLATE_V2_PATH,
+            HEALTHY_NUTRITION_TEMPLATE_PATH,
+        )
+    )
 
 
 def _load_healthy_nutrition_reference(path: Any) -> dict[str, Any]:

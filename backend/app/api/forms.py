@@ -192,6 +192,8 @@ def _answer_label_text(template_code: str, question_no: int, value: str | None) 
         return "Belirsiz"
     if value == "BLANK":
         return "Boş"
+    if template_code == "HEALTHY_NUTRITION_V3":
+        return {"NEVER": "Hiçbir zaman", "SOMETIMES": "Bazen", "ALWAYS": "Her zaman"}.get(value, value)
     if template_code.startswith("HEALTHY_NUTRITION_V"):
         if question_no >= 12:
             return {"NEVER": "Hiçbir zaman", "SOMETIMES": "1-2 kez/hafta", "OFTEN": "3-4 kez/hafta", "ALWAYS": "5+ kez/hafta"}.get(value, value)

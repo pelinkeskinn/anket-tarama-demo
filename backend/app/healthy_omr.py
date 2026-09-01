@@ -51,11 +51,17 @@ def is_healthy_template(template: dict[str, Any]) -> bool:
     return str(template.get("templateCode", "")).startswith(TEMPLATE_CODE_PREFIX)
 
 
+def option_order(question: dict[str, Any]) -> tuple[str, ...]:
+    """Return the options printed on a question in their left-to-right order."""
+    return tuple(option for option in OPTION_ORDER if option in question["options"])
+
+
 def read_answers(gray: np.ndarray, template: dict[str, Any]) -> list[AnswerResult]:
     answers: list[AnswerResult] = []
     for question in template["questions"]:
-        features = [calculate_fill_features(gray, question["options"][option]) for option in OPTION_ORDER]
-        answers.append(evaluate_question(question, features))
+        options = option_order(question)
+        features = [calculate_fill_features(gray, question["options"][option]) for option in options]
+        answers.append(evaluate_question(question, features, options))
     return answers
 
 
@@ -120,7 +126,10 @@ def calculate_fill_features(gray: np.ndarray, box: dict[str, int]) -> FillFeatur
     )
 
 
-def evaluate_question(question: dict[str, Any], features: list[FillFeatures]) -> AnswerResult:
+def evaluate_question(
+    question: dict[str, Any], features: list[FillFeatures], options: tuple[str, ...] | None = None
+) -> AnswerResult:
+    options = options or option_order(question)
     question_no = int(question["questionNo"])
     section = int(question["section"])
     scores = [feature.score for feature in features]
@@ -134,7 +143,7 @@ def evaluate_question(question: dict[str, Any], features: list[FillFeatures]) ->
         "questionNo": question_no,
         "section": section,
         "scores": scores,
-        "optionLabels": [str(question["optionLabels"][option]) for option in OPTION_ORDER],
+        "optionLabels": [str(question["optionLabels"][option]) for option in options],
     }
     if len(filled) >= 2:
         confidence = min(0.99, 0.72 + min(scores[index] for index in filled) * 0.25)
@@ -145,7 +154,7 @@ def evaluate_question(question: dict[str, Any], features: list[FillFeatures]) ->
         competing_ink = [index for index in inked if index != selected_index and scores[index] >= AMBIGUOUS_SCORE_THRESHOLD]
         if competing_ink:
             return AnswerResult(value=None, confidence=0.5, source="UNRESOLVED", status="AMBIGUOUS", **common)
-        option = OPTION_ORDER[selected_index]
+        option = options[selected_index]
         label = str(question["optionLabels"][option])
         runner_up = max(score for index, score in enumerate(scores) if index != selected_index)
         confidence = min(0.99, 0.70 + scores[selected_index] * 0.22 + max(0.0, scores[selected_index] - runner_up) * 0.12)
@@ -171,7 +180,7 @@ def evaluate_question(question: dict[str, Any], features: list[FillFeatures]) ->
         runner_up = max(score for index, score in enumerate(scores) if index != selected_index)
         margin = scores[selected_index] - runner_up
         if margin >= CLEAR_HAND_MARK_MARGIN:
-            option = OPTION_ORDER[selected_index]
+            option = options[selected_index]
             label = str(question["optionLabels"][option])
             confidence = min(0.94, 0.70 + scores[selected_index] * 0.20 + margin * 0.20)
             return AnswerResult(
@@ -220,7 +229,7 @@ def template_match_score(warped: np.ndarray, template: dict[str, Any]) -> float:
     circle_matches = 0
     total = 0
     for question in template["questions"]:
-        for option in OPTION_ORDER:
+        for option in option_order(question):
             total += 1
             box = question["options"][option]
             features = calculate_fill_features(gray, box)
@@ -281,7 +290,8 @@ def generate_debug_images(
     for question in template["questions"]:
         answer = by_question[int(question["questionNo"])]
         color = colors.get(answer.status, (255, 255, 255))
-        for option_index, option in enumerate(OPTION_ORDER):
+        options = option_order(question)
+        for option_index, option in enumerate(options):
             box = question["options"][option]
             center = (int(box["x"]) + int(box["width"]) // 2, int(box["y"]) + int(box["height"]) // 2)
             radius = round(min(int(box["width"]), int(box["height"])) * 0.392)
@@ -297,7 +307,7 @@ def generate_debug_images(
                 1,
                 cv2.LINE_AA,
             )
-        first_box = question["options"][OPTION_ORDER[0]]
+        first_box = question["options"][options[0]]
         cv2.putText(
             overlay,
             f"{answer.status} c={answer.confidence:.2f}",

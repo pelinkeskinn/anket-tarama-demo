@@ -1,0 +1,412 @@
+{
+  "templateCode": "HEALTHY_NUTRITION_V3",
+  "sourceFilename": "TÜRK_KIZILAY_ANKET_FORMU.pdf",
+  "sourceSha256": "0ccb42d4c495201e56579f6623e84105d1396353fe8f53924c459895bc6eba80",
+  "pageWidth": 2480,
+  "pageHeight": 3508,
+  "markerSize": 49,
+  "markerCenters": {
+    "topLeft": {
+      "x": 191.5,
+      "y": 102.1
+    },
+    "topRight": {
+      "x": 2288.5,
+      "y": 102.1
+    },
+    "bottomRight": {
+      "x": 2288.5,
+      "y": 3434.0
+    },
+    "bottomLeft": {
+      "x": 191.5,
+      "y": 3434.0
+    }
+  },
+  "sectionBands": [
+    {
+      "section": 1,
+      "x": 167,
+      "y": 517,
+      "width": 2146,
+      "height": 70
+    }
+  ],
+  "questions": [
+    {
+      "questionNo": 1,
+      "section": 1,
+      "questionText": "Tuzlu gıdaları (cips, kraker, bisküvi gibi) tüketirim.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.210808,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.210808,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.210808,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 2,
+      "section": 1,
+      "questionText": "Yumurta gibi protein barındıran besinleri günlük öğünlerimde tüketirim.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.262767,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.262767,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.262767,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 3,
+      "section": 1,
+      "questionText": "Ailemi eve sağlıklı olmayan besinler almaması için uyarırım.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.309679,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.309679,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.309679,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 4,
+      "section": 1,
+      "questionText": "Kahvaltıda peynir, yumurta, zeytin, bal gibi besinler tüketirim.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.356591,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.356591,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.356591,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 5,
+      "section": 1,
+      "questionText": "Arkadaşlarım sağlıklı olmayan besinler tükettiğinde onları uyarırım.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.403207,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.403207,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.403207,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 6,
+      "section": 1,
+      "questionText": "Şekerli gıdaları (şeker, çikolata, jelibon gibi) tüketirim.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.450119,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.450119,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.450119,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 7,
+      "section": 1,
+      "questionText": "Besinlerin son tüketim tarihlerinin geçmemiş olmasına dikkat ederim.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.502078,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.502078,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.502078,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 8,
+      "section": 1,
+      "questionText": "Abur cubur gıdaları (cips, bisküvi, jelibon gibi) tüketirim.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.549109,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.549109,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.549109,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 9,
+      "section": 1,
+      "questionText": "Gıda ve beslenme konularında herhangi bir sorum olursa ailem ve öğretmenlerimden bilgi alırım.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.600950,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.600950,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.600950,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 10,
+      "section": 1,
+      "questionText": "Besinleri satın alırken paketin zarar görmemiş olmasına dikkat ederim.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.652910,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.652910,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.652910,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 11,
+      "section": 1,
+      "questionText": "Yiyecek paketlerinin üstündeki son tüketim tarihine bakarım.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.699822,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.699822,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.699822,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 12,
+      "section": 1,
+      "questionText": "Gazete, dergi ve kitaplardan okuduğum beslenme konularını kolaylıkla anlayabilirim.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.751485,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.751485,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.751485,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 13,
+      "section": 1,
+      "questionText": "Okulda arkadaşlarımın yediği cips, jelibon gibi besinleri ben de yemek isterim.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.803444,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.803444,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.803444,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 14,
+      "section": 1,
+      "questionText": "Asitli içecekleri (kola, fanta, gazoz gibi) tüketirim.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.850356,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.850356,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.850356,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    },
+    {
+      "questionNo": 15,
+      "section": 1,
+      "questionText": "Öğünlerimde farklı sebzeler (bezelye, brokoli, domates gibi) tüketirim.",
+      "options": {
+        "NEVER": {
+          "cx": 0.667506,
+          "cy": 0.902316,
+          "r": 0.012096774193548387,
+          "label": "Hiçbir Zaman"
+        },
+        "SOMETIMES": {
+          "cx": 0.771620,
+          "cy": 0.902316,
+          "r": 0.012096774193548387,
+          "label": "Bazen"
+        },
+        "ALWAYS": {
+          "cx": 0.875735,
+          "cy": 0.902316,
+          "r": 0.012096774193548387,
+          "label": "Her Zaman"
+        }
+      }
+    }
+  ]
+}

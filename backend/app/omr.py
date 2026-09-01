@@ -78,7 +78,7 @@ def analyze_image_bytes(
                     # A PDF page normally already is the normalized sheet. If
                     # its contents came from a skewed scan, fall back to the
                     # slower marker/page detector instead of rejecting it.
-                    if not (is_pdf or guided_capture) or exc.code != "INVALID_TEMPLATE":
+                    if is_pdf or not guided_capture or exc.code != "INVALID_TEMPLATE":
                         raise
                     detected_source = _find_warp_source(oriented_image, template)
                     warp_sources[aspect_key] = detected_source

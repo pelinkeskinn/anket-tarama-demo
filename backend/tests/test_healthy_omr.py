@@ -13,6 +13,7 @@ from app.healthy_omr import (
     calculate_fill_features,
     evaluate_question,
     generate_debug_images,
+    option_order,
     read_answers,
     template_match_score,
 )
@@ -92,6 +93,31 @@ def test_revised_reference_geometry_contains_104_rois() -> None:
     assert sum(len(question["options"]) for question in template["questions"]) == 104
     assert [question["section"] for question in template["questions"][:11]] == [1] * 11
     assert [question["section"] for question in template["questions"][11:]] == [2] * 15
+
+
+def test_current_kizilay_form_has_15_questions_and_three_options() -> None:
+    template = healthy_template("HEALTHY_NUTRITION_V3")
+
+    assert template["sourceSha256"] == "0ccb42d4c495201e56579f6623e84105d1396353fe8f53924c459895bc6eba80"
+    assert template["questionCount"] == 15
+    assert all(option_order(question) == ("NEVER", "SOMETIMES", "ALWAYS") for question in template["questions"])
+
+    answers = read_answers(cv2.cvtColor(canonical_blank_form(template), cv2.COLOR_BGR2GRAY), template)
+    assert len(answers) == 15
+    assert all(answer.status == "BLANK" and len(answer.scores or []) == 3 for answer in answers)
+
+
+def test_current_kizilay_form_reads_the_third_option() -> None:
+    template = healthy_template("HEALTHY_NUTRITION_V3")
+    form = canonical_blank_form(template)
+    box = template["questions"][0]["options"]["ALWAYS"]
+    center = (int(box["x"]) + int(box["width"]) // 2, int(box["y"]) + int(box["height"]) // 2)
+    cv2.circle(form, center, 24, (60, 60, 60), -1)
+
+    answer = read_answers(cv2.cvtColor(form, cv2.COLOR_BGR2GRAY), template)[0]
+    assert answer.value == "ALWAYS"
+    assert answer.selectedLabel == "Her Zaman"
+    assert answer.status == "MARKED"
 
 
 def test_answers_expose_labels_from_the_matched_form_template() -> None:

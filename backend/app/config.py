@@ -10,6 +10,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 TEMPLATE_PATH = ROOT_DIR / "backend" / "templates" / "demo_form_v1.json"
 HEALTHY_NUTRITION_TEMPLATE_PATH = ROOT_DIR / "backend" / "templates" / "healthy_nutrition_survey_v1.json"
 HEALTHY_NUTRITION_TEMPLATE_V2_PATH = ROOT_DIR / "backend" / "templates" / "healthy_nutrition_survey_v2.json"
+HEALTHY_NUTRITION_TEMPLATE_V3_PATH = ROOT_DIR / "backend" / "templates" / "healthy_nutrition_survey_v3.json"
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", ROOT_DIR / "backend" / "data" / "demo.db"))
 SAMPLE_FORMS_DIR = ROOT_DIR / "sample-forms"
 OMR_DEBUG_DIR = Path(os.getenv("OMR_DEBUG_DIR", ROOT_DIR / "backend" / "debug"))
