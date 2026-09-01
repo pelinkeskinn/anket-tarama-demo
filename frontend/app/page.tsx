@@ -89,7 +89,6 @@ export default function Page() {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const submittingRef = useRef(false);
-  const autoCaptureRef = useRef(false);
   const previousFrameRef = useRef<Uint8ClampedArray | null>(null);
   const stableFramesRef = useRef(0);
   const frozenFramesRef = useRef(0);
@@ -161,12 +160,6 @@ export default function Page() {
   }, [screen]);
 
   useEffect(() => {
-    if (screen === "scanner" && cameraState === "idle") {
-      void requestCamera();
-    }
-  }, [screen, cameraState]);
-
-  useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState !== "visible" || screenRef.current !== "scanner") {
         return;
@@ -191,13 +184,12 @@ export default function Page() {
     if (cameraState !== "ready" || screen !== "scanner") {
       return;
     }
-    autoCaptureRef.current = false;
     previousFrameRef.current = null;
     stableFramesRef.current = 0;
     frozenFramesRef.current = 0;
     const timer = window.setInterval(() => {
       const video = videoRef.current;
-      if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || submittingRef.current || autoCaptureRef.current) {
+      if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || submittingRef.current) {
         return;
       }
       const check = inspectCameraFrame(video, frameRef.current, previousFrameRef.current);
@@ -247,10 +239,7 @@ export default function Page() {
         return;
       }
       setQuality("ready");
-      setGuidance("Form algılandı — otomatik taranıyor");
-      autoCaptureRef.current = true;
-      window.clearInterval(timer);
-      void captureAndAnalyze(true);
+      setGuidance("Form hazır — TARAT'a dokunun");
     }, CAMERA_CHECK_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [cameraState, screen]);
@@ -336,7 +325,7 @@ export default function Page() {
     );
   }
 
-  async function captureAndAnalyze(automatic = false) {
+  async function captureAndAnalyze() {
     if (!videoRef.current || submittingRef.current) {
       return;
     }
@@ -350,8 +339,6 @@ export default function Page() {
         : null;
     if (blob) {
       await analyzeBlob(blob, { templateHint: "HEALTHY_NUTRITION", guidedCapture: true, fallbackBlob });
-    } else if (automatic) {
-      autoCaptureRef.current = false;
     }
   }
 
@@ -479,7 +466,7 @@ export default function Page() {
         }
       }
       if (firstAttempt) {
-        onStatus("Sunucu uyandırılıyor, birkaç saniye sürebilir…\nÜcretsiz sunucu planı nedeniyle ilk tarama daha uzun sürebilir.");
+        onStatus("Sunucu uyandırılıyor, birkaç saniye sürebilir…");
         firstAttempt = false;
       }
       await sleep(Math.min(delay, deadline - Date.now()), signal);
@@ -836,28 +823,36 @@ export default function Page() {
       <Header scannedCount={scannedCount} databaseStatus={databaseStatus} onHistory={() => void loadHistory(true)} />
       {screen === "scanner" && (
         <section className="scan">
-          <div className="camera-shell">
+          <div className={`camera-shell ${cameraState === "ready" ? "camera-active" : ""}`}>
             {cameraState === "ready" ? (
-              <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => void attachCameraStream()} />
+              <>
+                <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => void attachCameraStream()} />
+                <button className="camera-close-button" onClick={pauseCamera} aria-label="Kamerayı kapat">
+                  Kamerayı kapat
+                </button>
+              </>
             ) : (
               <CameraFallback state={cameraState} onRequest={requestCamera} />
             )}
-            <div ref={frameRef} className={`frame ${quality}`} aria-label="A4 hizalama çerçevesi">
-              <span className="corner tl" />
-              <span className="corner tr" />
-              <span className="corner br" />
-              <span className="corner bl" />
-              <span className="scan-sweep" aria-hidden="true" />
-              <span className="scan-focus-label">Taranan alan</span>
-            </div>
-            <div className="guidance">{cameraState === "ready" ? guidance : "Forma dokunarak odaklayın"}</div>
-            <div className="cold-start-note">Ücretsiz sunucu planı nedeniyle ilk tarama daha uzun sürebilir.</div>
+            {cameraState === "ready" && (
+              <>
+                <div ref={frameRef} className={`frame ${quality}`} aria-label="A4 hizalama çerçevesi">
+                  <span className="corner tl" />
+                  <span className="corner tr" />
+                  <span className="corner br" />
+                  <span className="corner bl" />
+                </div>
+                <div className="guidance">{guidance}</div>
+              </>
+            )}
           </div>
 
           <div className="actions">
-            <button className="scan-button" onClick={() => void captureAndAnalyze()} disabled={cameraState !== "ready" || submittingRef.current}>
-              TARAT
-            </button>
+            {cameraState === "ready" && (
+              <button className="scan-button" onClick={() => void captureAndAnalyze()} disabled={submittingRef.current}>
+                TARAT
+              </button>
+            )}
             <label className="upload-card">
               <input className="upload-input" type="file" accept="image/*,application/pdf" onChange={uploadTestImage} aria-label="Test Görseli Yükle" />
               <span className="upload-title">Anket fotoğrafı yükle</span>
@@ -936,23 +931,30 @@ function CameraFallback({
   state: CameraState;
   onRequest: () => void;
 }) {
-  let message = "Kamera hazırlanıyor...";
+  let title = "Kamera kapalı";
+  let message = "Taramaya başlamak için kamerayı açın.";
   if (state === "denied") {
+    title = "Kamera izni gerekli";
     message = "Form tarayabilmek için kamera izni vermeniz gerekiyor.";
   }
   if (state === "idle" || state === "stalled") {
-    message = state === "stalled" ? "Kamera durdu. Yeniden başlatmak için butona dokunun." : "Kamerayı başlatmak için butona dokunun.";
+    title = state === "stalled" ? "Kamera durdu" : "Kamera kapalı";
+    message = state === "stalled" ? "Yeniden başlatmak için aşağıdaki düğmeyi kullanın." : "Formu kadraja aldıktan sonra taramayı siz başlatacaksınız.";
   }
   if (state === "unsupported") {
+    title = "Kamera desteklenmiyor";
     message = "Bu tarayıcı kamera ile taramayı desteklemiyor.";
   }
   if (state === "insecure") {
+    title = "Güvenli bağlantı gerekli";
     message = "Kamera için güvenli bağlantı gerekiyor. Telefonu HTTPS tüneli ya da localhost üzerinden açın.";
   }
   return (
     <div className="camera-placeholder">
-      <div className="stack">
-        <strong>{message}</strong>
+      <div className="camera-placeholder-card">
+        <span className="camera-icon" aria-hidden="true">▣</span>
+        <strong>{title}</strong>
+        <p>{message}</p>
         {(state === "denied" || state === "idle" || state === "insecure" || state === "stalled") && (
           <button className="primary-button" onClick={onRequest}>
             Kamerayı Başlat

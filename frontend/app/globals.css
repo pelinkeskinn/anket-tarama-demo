@@ -130,11 +130,12 @@ button:disabled {
 .camera-shell {
   position: relative;
   flex: 1;
-  min-height: 430px;
-  border-radius: 8px;
+  min-height: 360px;
+  border-radius: 16px;
   overflow: hidden;
-  background: #121719;
-  border: 1px solid #202b30;
+  background: #182329;
+  border: 1px solid #25343b;
+  box-shadow: 0 8px 24px rgba(22, 33, 38, 0.08);
 }
 
 .camera-shell video,
@@ -150,15 +151,58 @@ button:disabled {
   display: grid;
   place-items: center;
   padding: 28px;
-  color: white;
+  color: #f7fbfc;
   text-align: center;
-  background: linear-gradient(135deg, #1b252a, #344047);
+  background: radial-gradient(circle at top, #34474f, #182329 66%);
+}
+
+.camera-placeholder-card {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  max-width: 320px;
+}
+
+.camera-placeholder-card strong {
+  font-size: 22px;
+}
+
+.camera-placeholder-card p {
+  margin: 0 0 8px;
+  color: #c8d5d9;
+  line-height: 1.45;
+}
+
+.camera-icon {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 31px;
+}
+
+.camera-close-button {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  background: rgba(17, 24, 28, 0.72);
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
 }
 
 .frame {
   position: absolute;
   inset: 7% 10%;
-  border: 3px solid #9aa5aa;
+  border: 2px solid #9aa5aa;
   aspect-ratio: 210 / 297;
   max-height: 84%;
   margin: auto;
@@ -175,42 +219,6 @@ button:disabled {
 
 .frame.bad {
   border-color: var(--red);
-}
-
-.scan-sweep {
-  position: absolute;
-  left: 5%;
-  right: 5%;
-  height: 3px;
-  top: 8%;
-  border-radius: 999px;
-  background: rgba(79, 224, 163, 0.95);
-  box-shadow: 0 0 14px rgba(79, 224, 163, 0.9);
-  animation: scan-sweep 2.3s ease-in-out infinite;
-}
-
-.frame.bad .scan-sweep {
-  background: rgba(255, 183, 77, 0.95);
-  box-shadow: 0 0 14px rgba(255, 183, 77, 0.8);
-}
-
-.scan-focus-label {
-  position: absolute;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  border-radius: 999px;
-  padding: 4px 8px;
-  background: rgba(10, 17, 20, 0.72);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-@keyframes scan-sweep {
-  0%, 100% { top: 10%; opacity: 0.35; }
-  50% { top: 88%; opacity: 1; }
 }
 
 .corner {
@@ -255,7 +263,7 @@ button:disabled {
   right: 16px;
   bottom: 16px;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.92);
   text-align: center;
   font-weight: 700;
@@ -268,7 +276,7 @@ button:disabled {
 
 .scan-button {
   min-height: 62px;
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--brand);
   color: white;
   font-size: 20px;
@@ -486,17 +494,6 @@ button:disabled {
 .export-actions {
   display: grid;
   gap: 8px;
-}
-
-.cold-start-note {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
-  color: #d7e1e6;
-  font-size: 12px;
-  text-align: center;
-  text-shadow: 0 1px 2px #000;
 }
 
 .history-table-wrap {
