@@ -1,4 +1,5 @@
 services:
+  # Backend Service
   - type: web
     name: anket-tarama-backend
     runtime: python
@@ -23,6 +24,36 @@ services:
         value: 4
       - key: ADMIN_TOKEN
         sync: false
+
+  # Frontend Service
+  - type: web
+    name: anket-tarama-frontend
+    runtime: node
+    plan: free
+    buildCommand: cd frontend && npm ci && npm run build
+    startCommand: cd frontend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_BASE_URL
+        fromService:
+          type: web
+          name: anket-tarama-backend
+          property: url
+      - key: NEXT_PUBLIC_ADMIN_TOKEN
+        sync: false
+    routes:
+      - path: /
+        destination: /
+    previewPlan: free
+    disk:
+      name: cache
+      mountPath: /var/cache
+      sizeGB: 1
+    buildCache:
+      paths:
+        - frontend/node_modules
+        - frontend/.next
       # Do not set OMR_DEBUG_ENABLED in production; debug images consume disk.
 
   - type: web
