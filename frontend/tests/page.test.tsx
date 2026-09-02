@@ -305,8 +305,8 @@ describe("scanner page", () => {
     expect(await screen.findByText("#42")).toBeInTheDocument();
   });
 
-  test("page title is anket-tarama", async () => {
+  test("page title is Anket Tarama", async () => {
     render(<Page />);
-    expect(screen.getByText("anket-tarama")).toBeInTheDocument();
+    expect(screen.getByText("Anket Tarama")).toBeInTheDocument();
   });
 });

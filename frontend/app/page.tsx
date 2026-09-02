@@ -2,9 +2,9 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
-import { CAMERA_JPEG_QUALITY, captureScale, framesEqual, fullCameraFrame, guideCaptureRegion, type CaptureRegion } from "@/lib/camera";
-import { getLocalForm, localSummaries, removeLocalForm, upsertLocalForm } from "@/lib/formArchive";
-import { pushAppScreen, readPopStateScreen, replaceAppScreen, type AppScreen } from "@/lib/screenNavigation";
+import { CAMERA_JPEG_QUALITY, captureScale, framesEqual, fullCameraFrame, guideCaptureRegion, type CaptureRegion } from "./camera";
+import { getLocalForm, localSummaries, removeLocalForm, upsertLocalForm } from "./formArchive";
+import { pushAppScreen, readPopStateScreen, replaceAppScreen, type AppScreen } from "./screenNavigation";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://anket-tarama-backend.onrender.com").replace(/\/$/, "");
 const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN ?? "";
@@ -829,7 +829,7 @@ export default function Page() {
       {screen === "scanner" && (
         <section className="scan">
           <div className="scan-intro">
-            <strong>Anket tarama</strong>
+            <strong>Anket Tarama</strong>
             <span>Formu çerçevenin içine yerleştirin; görüntü netleştiğinde tarama otomatik başlar.</span>
           </div>
           <div className={`camera-shell ${cameraState === "ready" ? "camera-active" : ""}`}>
@@ -911,7 +911,7 @@ function Header({
   return (
     <header className="topbar">
       <div>
-        <div className="title">anket-tarama</div>
+        <div className="title">Anket Tarama</div>
         <div className="counter">Taranan: {scannedCount}</div>
         <div className={`database-status ${databaseStatus}`}>{databaseLabel}</div>
       </div>
@@ -1109,7 +1109,6 @@ function SuccessScreen({ analysis, onNext, onDiscard }: { analysis: Analysis; on
     <section className="screen">
       <div className="panel success stack">
         <div className="status-title">Form başarıyla okundu</div>
-        <div>Form güven puanı: %{Math.round(analysis.formConfidence * 100)}</div>
         <div>Otomatik okunan soru sayısı: {autoCount}</div>
         <div>Manuel düzeltilen soru sayısı: {manualCount}</div>
         <div>Boş cevap sayısı: {blankCount}</div>
@@ -1253,7 +1252,6 @@ function DetailScreen({
         <div className="panel stack">
           <div className="status-title">Form #{detail.id}</div>
           <span>{new Date(detail.createdAt).toLocaleString("tr-TR")}</span>
-          <span>Form güven puanı: %{Math.round(detail.formConfidence * 100)}</span>
           <span>Boş cevap: {detail.blankCount}</span>
           <span>Manuel düzeltme: {detail.manualCount}</span>
         </div>

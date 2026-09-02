@@ -9,7 +9,8 @@ import "@fontsource/ibm-plex-mono/600.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "anket-tarama",
+  metadataBase: new URL("https://ankettarama.onrender.com"),
+  title: "Anket Tarama",
   description: "Optik form tarama uygulaması"
 };
 
