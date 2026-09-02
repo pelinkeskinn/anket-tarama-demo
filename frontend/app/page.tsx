@@ -1,10 +1,10 @@
 "use client";
 
-import { ChangeEvent, memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
-import { CAMERA_JPEG_QUALITY, captureScale, framesEqual, fullCameraFrame, guideCaptureRegion, type CaptureRegion } from "./camera";
-import { getLocalForm, localSummaries, removeLocalForm, upsertLocalForm } from "./formArchive";
-import { pushAppScreen, readPopStateScreen, replaceAppScreen, type AppScreen } from "./screenNavigation";
+import { CAMERA_JPEG_QUALITY, captureScale, framesEqual, fullCameraFrame, guideCaptureRegion, type CaptureRegion } from "@/lib/camera";
+import { getLocalForm, localSummaries, removeLocalForm, upsertLocalForm } from "@/lib/formArchive";
+import { pushAppScreen, readPopStateScreen, replaceAppScreen, type AppScreen } from "@/lib/screenNavigation";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://anket-tarama-backend.onrender.com").replace(/\/$/, "");
 const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN ?? "";
@@ -624,14 +624,6 @@ export default function Page() {
     void refreshDatabaseState();
   }
 
-  async function uploadTestImage(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (file) {
-      await analyzeBlob(file);
-      event.target.value = "";
-    }
-  }
-
   async function refreshDatabaseState() {
     try {
       const response = await fetch(`${API_BASE}/readyz`, { cache: "no-store" });
@@ -865,12 +857,6 @@ export default function Page() {
                 TARAT
               </button>
             )}
-            <label className="upload-card">
-              <input className="upload-input" type="file" accept="image/*,application/pdf" onChange={uploadTestImage} aria-label="Test Görseli Yükle" />
-              <span className="upload-title">Anket fotoğrafı yükle</span>
-              <span className="upload-copy">Bilgisayarındaki veya telefonundaki form fotoğrafını seçip doğrudan analiz et.</span>
-              <span className="upload-action">Fotoğraf Seç</span>
-            </label>
           </div>
         </section>
       )}
